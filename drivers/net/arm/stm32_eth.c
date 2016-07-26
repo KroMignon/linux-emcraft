@@ -37,6 +37,7 @@
 #include <asm/setup.h>
 
 #include <mach/eth.h>
+#include <mach/platform.h>
 
 #if defined(CONFIG_STM32_ETHER_BUF_IN_SRAM)
 # define STM32_SRAM	(SRAM_PHYS_OFFSET + CONFIG_STM32_ETHER_BUF_IN_SRAM_BASE)
@@ -142,6 +143,7 @@
  * DMA transmit buffer descriptor bits
  */
 #define STM32_DMA_TBD_DMA_OWN		(1 << 31)	/* DMA/CPU owns bd    */
+#define STM32_DMA_TBD_IC		(1 << 30)	/* Interrupt on compl.*/
 #define STM32_DMA_TBD_LS		(1 << 29)	/* Last segment	      */
 #define STM32_DMA_TBD_FS		(1 << 28)	/* First segment      */
 #define STM32_DMA_TBD_TCH		(1 << 20)	/* 2nd address chained*/
@@ -281,6 +283,7 @@ struct stm32_eth_priv {
 
 	spinlock_t			rx_lock;
 	spinlock_t			tx_lock;
+	u32				opened;
 
 	/*
 	 * PHY settings
@@ -973,6 +976,11 @@ static int stm32_netdev_open(struct net_device *dev)
 	struct stm32_eth_priv	*stm = netdev_priv(dev);
 	int			rv;
 
+	if (stm->opened) {
+		rv = 0;
+		goto out;
+	}
+
 #if defined(CONFIG_ARCH_LPC18XX)
 	rv = stm32_eth_get_mdio_clock(dev);
 	if (rv < 0) {
@@ -980,6 +988,21 @@ static int stm32_netdev_open(struct net_device *dev)
 		goto out;
 	}
 #endif /* CONFIG_ARCH_LPC18XX */
+
+	if (stm32_platform_get() == PLATFORM_STM32_STM_STM32F7_SOM) {
+		/*
+		 * When exiting from PHY power-off state on STM32F7-SOM we may
+		 * sometimes have 16h.0 (MII Override) bit set. Obviously, this
+		 * results to an incorrect PHY operating. So, we always
+		 * set the necessary override val (16h.1 RMII Override) here
+		 */
+		u16	val;
+
+		val = phy_read(stm->phy_dev, MII_SREVISION);
+		val &= ~(1 << 0);	/* Clear MII */
+		val |= (1 << 1);	/* Set RMII */
+		phy_write(stm->phy_dev, MII_SREVISION, val);
+	}
 
 	/*
 	 * Start aneg on PHY
@@ -1036,13 +1059,15 @@ static int stm32_netdev_open(struct net_device *dev)
 	rv = 0;
 
 init_err:
-	if (rv)
+	if (rv) {
 		phy_stop(stm->phy_dev);
-
 #if defined(CONFIG_ARCH_LPC18XX)
-	stm32_eth_put_mdio_clock(dev);
-out:
+		stm32_eth_put_mdio_clock(dev);
 #endif /* CONFIG_ARCH_LPC18XX */
+	} else {
+		stm->opened = 1;
+	}
+out:
 	return rv;
 }
 
@@ -1052,6 +1077,9 @@ out:
 static int stm32_netdev_close(struct net_device *dev)
 {
 	struct stm32_eth_priv	*stm = netdev_priv(dev);
+
+	if (!stm->opened)
+		goto out;
 
 	napi_disable(&stm->napi);
 	netif_stop_queue(dev);
@@ -1067,6 +1095,8 @@ static int stm32_netdev_close(struct net_device *dev)
 	stm32_eth_put_mdio_clock(dev);
 #endif /* CONFIG_ARCH_LPC18XX */
 
+	stm->opened = 0;
+out:
 	return 0;
 }
 
@@ -1141,7 +1171,7 @@ static int stm32_netdev_xmit(struct sk_buff *skb, struct net_device *dev)
 					       skb->len, DMA_TO_DEVICE);
 #endif
 	stm->tx_bd[idx].stat |= STM32_DMA_TBD_FS | STM32_DMA_TBD_LS |
-				STM32_DMA_TBD_DMA_OWN;
+				STM32_DMA_TBD_IC | STM32_DMA_TBD_DMA_OWN;
 
 	/*
 	 * Command DMA to refetch BD (legaly even if DMA already running)
@@ -1652,12 +1682,40 @@ out:
 	return 0;
 }
 
+#if defined(CONFIG_PM)
+static int stm32_plat_suspend(struct platform_device *pdev, pm_message_t state)
+{
+	struct net_device	*dev = platform_get_drvdata(pdev);
+	struct stm32_eth_priv	*stm = netdev_priv(dev);
+	int			rv;
+
+	rv = stm32_netdev_close(dev);
+	stm->regs->maccr &= ~(STM32_MAC_CR_TE | STM32_MAC_CR_RE);
+
+	return rv;
+}
+
+static int stm32_plat_resume(struct platform_device *pdev)
+{
+	struct net_device	*dev = platform_get_drvdata(pdev);
+	int			rv;
+
+	rv = stm32_netdev_open(dev);
+
+	return rv;
+}
+#endif
+
 /*
  * Platform driver instance
  */
 static struct platform_driver	stm32_eth_driver = {
 	.probe		= stm32_plat_probe,
 	.remove		= stm32_plat_remove,
+#if defined(CONFIG_PM)
+	.suspend	= stm32_plat_suspend,
+	.resume		= stm32_plat_resume,
+#endif
 	.driver		= {
 		.name	= STM32_ETH_DRV_NAME,
 		.owner	= THIS_MODULE,

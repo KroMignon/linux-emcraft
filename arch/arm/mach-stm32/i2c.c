@@ -29,12 +29,13 @@
 #include <mach/platform.h>
 #include <mach/clock.h>
 #include <mach/i2c.h>
+#include <mach/dmainit.h>
 #if defined(CONFIG_GPIO_PCAL6416A)
 #include <mach/gpio.h>
 #include <linux/i2c/pcal6416a.h>
 #endif
 
-/* 
+/*
  * Size of the I2C controller register area
  */
 #define I2C_STM32_REGS_SIZE	0x3FF
@@ -58,10 +59,26 @@ static struct resource i2c_stm32_dev1_resources[] = {
 		.end	= I2C_STM32_DEV1_REGS + I2C_STM32_REGS_SIZE,
 		.flags	= IORESOURCE_MEM,
 	},
+#if defined (CONFIG_ARCH_STM32F7)
+	{
+		.name	= "dma_tx_channel",
+		.start	= STM32F7_DMACH_I2C1_TX,
+		.flags	= IORESOURCE_DMA,
+	},
+	{
+		.name	= "dma_rx_channel",
+		.start	= STM32F7_DMACH_I2C1_RX,
+		.flags	= IORESOURCE_DMA,
+	}
+#endif
 };
 
 static struct platform_device i2c_stm32_dev1 = {
+#if defined (CONFIG_ARCH_STM32F7)
+	.name           = "i2c_stm32f7",
+#else
 	.name           = "i2c_stm32",
+#endif
 	.id             = 0,
 	.num_resources  = ARRAY_SIZE(i2c_stm32_dev1_resources),
 	.resource       = i2c_stm32_dev1_resources,
@@ -92,10 +109,26 @@ static struct resource i2c_stm32_dev2_resources[] = {
 		.end	= I2C_STM32_DEV2_REGS + I2C_STM32_REGS_SIZE,
 		.flags	= IORESOURCE_MEM,
 	},
+#if defined (CONFIG_ARCH_STM32F7)
+	{
+		.name	= "dma_tx_channel",
+		.start	= STM32F7_DMACH_I2C2_TX,
+		.flags	= IORESOURCE_DMA,
+	},
+	{
+		.name	= "dma_rx_channel",
+		.start	= STM32F7_DMACH_I2C2_RX,
+		.flags	= IORESOURCE_DMA,
+	}
+#endif
 };
 
 static struct platform_device i2c_stm32_dev2 = {
+#if defined (CONFIG_ARCH_STM32F7)
+	.name           = "i2c_stm32f7",
+#else
 	.name           = "i2c_stm32",
+#endif
 	.id             = 1,
 	.num_resources  = ARRAY_SIZE(i2c_stm32_dev2_resources),
 	.resource       = i2c_stm32_dev2_resources,
@@ -126,10 +159,26 @@ static struct resource i2c_stm32_dev3_resources[] = {
 		.end	= I2C_STM32_DEV3_REGS + I2C_STM32_REGS_SIZE,
 		.flags	= IORESOURCE_MEM,
 	},
+#if defined (CONFIG_ARCH_STM32F7)
+	{
+		.name	= "dma_tx_channel",
+		.start	= STM32F7_DMACH_I2C3_TX,
+		.flags	= IORESOURCE_DMA,
+	},
+	{
+		.name	= "dma_rx_channel",
+		.start	= STM32F7_DMACH_I2C3_RX,
+		.flags	= IORESOURCE_DMA,
+	}
+#endif
 };
 
 static struct platform_device i2c_stm32_dev3 = {
+#if defined (CONFIG_ARCH_STM32F7)
+	.name           = "i2c_stm32f7",
+#else
 	.name           = "i2c_stm32",
+#endif
 	.id             = 2,
 	.num_resources  = ARRAY_SIZE(i2c_stm32_dev3_resources),
 	.resource       = i2c_stm32_dev3_resources,
@@ -142,6 +191,50 @@ static struct i2c_stm32_data i2c_stm32_data_dev3 = {
 #endif	/* CONFIG_STM32_I2C3 */
 
 /*
+ * I2C_4
+ */
+#if defined(CONFIG_STM32_I2C4)
+
+#define I2C_STM32_DEV4_IRQ	95
+#define I2C_STM32_DEV4_REGS	0x40006000
+
+static struct resource i2c_stm32_dev4_resources[] = {
+	{
+		.start	= I2C_STM32_DEV4_IRQ,
+		.end	= I2C_STM32_DEV4_IRQ,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.start	= I2C_STM32_DEV4_REGS,
+		.end	= I2C_STM32_DEV4_REGS + I2C_STM32_REGS_SIZE,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.name	= "dma_tx_channel",
+		.start	= STM32F7_DMACH_I2C4_TX,
+		.flags	= IORESOURCE_DMA,
+	},
+	{
+		.name	= "dma_rx_channel",
+		.start	= STM32F7_DMACH_I2C4_RX,
+		.flags	= IORESOURCE_DMA,
+	}
+};
+
+static struct platform_device i2c_stm32_dev4 = {
+	.name           = "i2c_stm32f7",
+	.id             = 3,
+	.num_resources  = ARRAY_SIZE(i2c_stm32_dev4_resources),
+	.resource       = i2c_stm32_dev4_resources,
+};
+
+static struct i2c_stm32_data i2c_stm32_data_dev4 = {
+	.i2c_clk	= 100000,
+};
+
+#endif	/* CONFIG_STM32_I2C4 */
+
+/*
  * Register the STM32 specific I2C devices with the kernel.
  */
 void __init stm32_i2c_init(void)
@@ -150,48 +243,62 @@ void __init stm32_i2c_init(void)
 
 #if defined(CONFIG_STM32_I2C1)
 	/*
- 	 * Pass the device parameters to the driver
- 	 */
+	 * Pass the device parameters to the driver
+	 */
 	i2c_stm32_data_dev1.ref_clk = stm32_clock_get(CLOCK_PCLK1);
 	platform_set_drvdata(&i2c_stm32_dev1, &i2c_stm32_data_dev1);
 
 	/*
 	 * Register a platform device for this interface
 	 */
-	platform_device_register(&i2c_stm32_dev1);		
+	platform_device_register(&i2c_stm32_dev1);
 #endif
 
 #if defined(CONFIG_STM32_I2C2)
 	/*
- 	 * Pass the device parameters to the driver
- 	 */
+	 * Pass the device parameters to the driver
+	 */
 	i2c_stm32_data_dev2.ref_clk = stm32_clock_get(CLOCK_PCLK1);
 	platform_set_drvdata(&i2c_stm32_dev2, &i2c_stm32_data_dev2);
 
 	/*
 	 * Register a platform device for this interface
 	 */
-	platform_device_register(&i2c_stm32_dev2);		
+	platform_device_register(&i2c_stm32_dev2);
 #endif
 
 #if defined(CONFIG_STM32_I2C3)
 	/*
- 	 * Pass the device parameters to the driver
- 	 */
+	 * Pass the device parameters to the driver
+	 */
 	i2c_stm32_data_dev3.ref_clk = stm32_clock_get(CLOCK_PCLK1);
 	platform_set_drvdata(&i2c_stm32_dev3, &i2c_stm32_data_dev3);
 
 	/*
 	 * Register a platform device for this interface
 	 */
-	platform_device_register(&i2c_stm32_dev3);		
+	platform_device_register(&i2c_stm32_dev3);
+#endif
+
+#if defined(CONFIG_STM32_I2C4)
+	/*
+	 * Pass the device parameters to the driver
+	 */
+	i2c_stm32_data_dev4.ref_clk = stm32_clock_get(CLOCK_PCLK1);
+	platform_set_drvdata(&i2c_stm32_dev4, &i2c_stm32_data_dev4);
+
+	/*
+	 * Register a platform device for this interface
+	 */
+	platform_device_register(&i2c_stm32_dev4);
 #endif
 
 	/*
- 	 * Perform board-specific I2C device registration
- 	 */
+	 * Perform board-specific I2C device registration
+	 */
 	if (p == PLATFORM_STM32_STM_SOM ||
-	    p == PLATFORM_STM32_STM_STM32F439_SOM) {
+	    p == PLATFORM_STM32_STM_STM32F439_SOM ||
+	    p == PLATFORM_STM32_STM_STM32F7_SOM) {
 #if defined(CONFIG_STM32_I2C1)
 
 		/*
@@ -200,7 +307,7 @@ void __init stm32_i2c_init(void)
 		 */
 #if defined(CONFIG_EEPROM_AT24)
 		static struct i2c_board_info i2c_eeprom__dongle = {
-			I2C_BOARD_INFO("24c512", 0x57)
+			I2C_BOARD_INFO("24c512", 0x56)
 		};
 #endif
 
@@ -242,4 +349,3 @@ void __init stm32_i2c_init(void)
 #endif
 	}
 }
-

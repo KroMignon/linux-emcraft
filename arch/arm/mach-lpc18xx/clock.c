@@ -40,134 +40,6 @@
 # include <mach/fb.h>
 #endif
 
-/*
- * PLL0* register map
- * Used for PLL0USB at 0x4005001C and for PLL0AUDIO at 0x4005002C.
- *
- * This structure is 0x10 bytes long, it is important when it embedding into
- * `struct lpc18xx_cgu_regs`.
- */
-struct lpc18xx_pll0_regs {
-	u32 stat;	/* PLL status register */
-	u32 ctrl;	/* PLL control register */
-	u32 mdiv;	/* PLL M-divider register */
-	u32 np_div;	/* PLL N/P-divider register */
-};
-
-/*
- * CGU (Clock Generation Unit) register map
- * Should be mapped at 0x40050000.
- */
-struct lpc18xx_cgu_regs {
-	u32 rsv0[5];
-	u32 freq_mon;		/* Frequency monitor */
-	u32 xtal_osc_ctrl;	/* XTAL oscillator control */
-	struct lpc18xx_pll0_regs pll0usb;	/* PLL0USB registers */
-	struct lpc18xx_pll0_regs pll0audio;	/* PLL0AUDIO registers */
-	u32 pll0audio_frac;	/* PLL0AUDIO fractional divider */
-	u32 pll1_stat;		/* PLL1 status register */
-	u32 pll1_ctrl;		/* PLL1 control register */
-	u32 idiv[5];		/* IDIVA_CTRL .. IDIVE_CTRL */
-
-	/* BASE_* clock configuration registers */
-	u32 safe_clk;
-	u32 usb0_clk;
-	u32 periph_clk;
-	u32 usb1_clk;
-	u32 m4_clk;
-	u32 spifi_clk;
-	u32 spi_clk;
-	u32 phy_rx_clk;
-	u32 phy_tx_clk;
-	u32 apb1_clk;
-	u32 apb3_clk;
-	u32 lcd_clk;
-	u32 vadc_clk;
-	u32 sdio_clk;
-	u32 ssp0_clk;
-	u32 ssp1_clk;
-	u32 uart0_clk;
-	u32 uart1_clk;
-	u32 uart2_clk;
-	u32 uart3_clk;
-	u32 out_clk;
-	u32 rsv1[4];
-	u32 apll_clk;
-	u32 cgu_out0_clk;
-	u32 cgu_out1_clk;
-};
-
-/*
- * CGU registers base
- */
-#define LPC18XX_CGU_BASE		0x40050000
-#define LPC18XX_CGU			((volatile struct lpc18xx_cgu_regs *) \
-					LPC18XX_CGU_BASE)
-
-/*
- * Bit offsets in Clock Generation Unit (CGU) registers
- */
-/*
- * Crystal oscillator control register (XTAL_OSC_CTRL)
- */
-/* Oscillator-pad enable */
-#define LPC18XX_CGU_XTAL_ENABLE		(1 << 0)
-/* Select frequency range */
-#define LPC18XX_CGU_XTAL_HF		(1 << 2)
-/*
- * For all CGU clock registers
- */
-/* CLK_SEL: Clock source selection */
-#define LPC18XX_CGU_CLKSEL_BITS		24
-#define LPC18XX_CGU_CLKSEL_MSK		(0x1F << LPC18XX_CGU_CLKSEL_BITS)
-/* Crystal oscillator */
-#define LPC18XX_CGU_CLKSEL_XTAL		(0x06 << LPC18XX_CGU_CLKSEL_BITS)
-/* PLL1 */
-#define LPC18XX_CGU_CLKSEL_PLL1		(0x09 << LPC18XX_CGU_CLKSEL_BITS)
-/*
- * PLL1 control register
- */
-/* PLL1 power down */
-#define LPC18XX_CGU_PLL1CTRL_PD_MSK		(1 << 0)
-/* Input clock bypass control */
-#define LPC18XX_CGU_PLL1CTRL_BYPASS_MSK		(1 << 1)
-/* PLL feedback select */
-#define LPC18XX_CGU_PLL1CTRL_FBSEL_MSK		(1 << 6)
-/* PLL direct CCO output */
-#define LPC18XX_CGU_PLL1CTRL_DIRECT_MSK		(1 << 7)
-/* Post-divider division ratio P. The value applied is 2**P. */
-#define LPC18XX_CGU_PLL1CTRL_PSEL_MSK		(3 << 8)
-/* Block clock automatically during frequency change */
-#define LPC18XX_CGU_PLL1CTRL_AUTOBLOCK_MSK	(1 << 11)
-/* Pre-divider division ratio */
-#define LPC18XX_CGU_PLL1CTRL_NSEL_BITS		12
-#define LPC18XX_CGU_PLL1CTRL_NSEL_MSK \
-	(3 << LPC18XX_CGU_PLL1CTRL_NSEL_BITS)
-/* Feedback-divider division ratio (M) */
-#define LPC18XX_CGU_PLL1CTRL_MSEL_BITS		16
-#define LPC18XX_CGU_PLL1CTRL_MSEL_MSK \
-	(0xFF << LPC18XX_CGU_PLL1CTRL_MSEL_BITS)
-/*
- * PLL1 status register
- */
-/* PLL1 lock indicator */
-#define LPC18XX_CGU_PLL1STAT_LOCK	(1 << 0)
-
-/*
- * The structure that holds the information about a clock
- */
-struct clk {
-	/* Clock rate, the only possible value of */
-	unsigned long rate;
-
-	/* Reference count */
-	unsigned int enabled;
-
-	/* Custom `clk_*` functions */
-	unsigned long (*clk_get_rate)(struct clk *clk);
-	unsigned long (*clk_set_rate)(struct clk *clk, unsigned long rate);
-};
-
 static DEFINE_SPINLOCK(clocks_lock);
 
 /*
@@ -283,6 +155,13 @@ static struct clk clk_ssp1;
 #endif
 
 /*
+ * Clock for the SD/MMC block
+ */
+#if defined (CONFIG_LPC18XX_MMC)
+static struct clk clk_sdio;
+#endif
+
+/*
  * Clocks for each of the two I2C interfaces supported by the LPC18xx MCU.
  */
 #if defined (CONFIG_LPC18XX_I2C0)
@@ -291,6 +170,83 @@ static struct clk clk_i2c0;
 #if defined (CONFIG_LPC18XX_I2C1)
 static struct clk clk_i2c1;
 #endif
+
+#if defined (CONFIG_LPC18XX_I2S0)
+
+static unsigned long i2s_clk_set_rate(struct clk *clk, unsigned long rate)
+{
+	int div_rate, ret = 0, np_dec, frac;
+
+	if (rate & 0xFF) {
+		ret = -EINVAL;
+		goto out;
+	}
+
+	clk->rate = rate;
+	div_rate = rate / 256;
+
+	/* Values taken from Table 150 of UM10503 */
+	switch (div_rate) {
+	case 48000:
+		np_dec = 0x1003;
+		frac = 0x1a1cac;
+		break;
+	case 44100:
+		np_dec = 0x18;
+		frac = 0x070e56;
+		break;
+	case 32000:
+		np_dec = 0x1e;
+		frac = 0x072b02;
+		break;
+	case 24000:
+		np_dec = 0x1006;
+		frac = 0x133333;
+		break;
+	case 22050:
+		np_dec = 0x1006;
+		frac = 0x11a3d7;
+		break;
+	default:
+		ret = -EINVAL;
+		goto out;
+		break;
+	}
+
+	LPC18XX_CGU->cgu_out1_clk |= 1;
+	LPC18XX_CGU->pll0audio.ctrl = LPC18XX_CGU_POWERDOWN |
+		LPC18XX_CGU_CLKSEL_XTAL | LPC18XX_CGU_AUTOBLOCK_MSK;
+
+	/* Check for direct input on clock (no pre-divider since it is zero) */
+	if (!(np_dec >> 12))
+		LPC18XX_CGU->pll0audio.ctrl |= LPC18XX_CGU_DIRECTI;
+
+	LPC18XX_CGU->pll0audio.ctrl |= LPC18XX_CGU_PLL0AUDIO_PLLFRACT_REQ;
+
+	LPC18XX_CGU->pll0audio.np_div = np_dec;
+	LPC18XX_CGU->pll0audio_frac = frac;
+
+	LPC18XX_CGU->pll0audio.ctrl &= ~LPC18XX_CGU_POWERDOWN;
+	LPC18XX_CGU->pll0audio.ctrl |= LPC18XX_CGU_PLL0AUDIO_CLKEN;
+
+	while (!(LPC18XX_CGU->pll0audio.stat & 1));
+
+	LPC18XX_CGU->cgu_out1_clk = LPC18XX_CGU_CLKSEL_PLL0AUDIO;
+
+out:
+	return ret;
+}
+
+/*
+ * Clocks for I2S interface.
+ */
+static struct clk clk_i2s0 = {
+	.clk_set_rate	= i2s_clk_set_rate,
+};
+#endif
+
+/* DMA clock */
+static struct clk clk_dmac;
 
 #if defined (CONFIG_FB_ARMCLCD)
 /*
@@ -301,7 +257,7 @@ static struct clk clk_i2c1;
  * `linux-2.6.34-lpc32xx/arch/arm/mach-lpc32xx/clock.c` from
  * `http://lpclinux.com/`.
  */
-static int lcd_clk_set_rate(struct clk *clk, unsigned long rate)
+static unsigned long lcd_clk_set_rate(struct clk *clk, unsigned long rate)
 {
 	u32 tmp, prate, div;
 
@@ -376,17 +332,24 @@ static struct clk_lookup lpc18xx_clkregs[] = {
 	INIT_CLKREG(&clk_uart[2], NULL, "lpc18xx-uart.2"),
 	INIT_CLKREG(&clk_uart[3], NULL, "lpc18xx-uart.3"),
 	INIT_CLKREG(&clk_net, "eth0", NULL),
+	INIT_CLKREG(&clk_dmac, NULL, "clk_dmac"),
 #if defined (CONFIG_LPC18XX_SPI0)
 	INIT_CLKREG(&clk_ssp0, "dev:ssp0", NULL),
 #endif
 #if defined (CONFIG_LPC18XX_SPI1)
 	INIT_CLKREG(&clk_ssp1, "dev:ssp1", NULL),
 #endif
+#if defined (CONFIG_LPC18XX_MMC)
+	INIT_CLKREG(&clk_sdio, NULL, "sdio"),
+#endif
 #if defined (CONFIG_LPC18XX_I2C0)
 	INIT_CLKREG(&clk_i2c0, "lpc2k-i2c.0", NULL),
 #endif
 #if defined (CONFIG_LPC18XX_I2C1)
 	INIT_CLKREG(&clk_i2c1, "lpc2k-i2c.1", NULL),
+#endif
+#if defined (CONFIG_LPC18XX_I2S0)
+	INIT_CLKREG(&clk_i2s0, NULL, "i2s0_ck"),
 #endif
 #if defined (CONFIG_FB_ARMCLCD)
 	INIT_CLKREG(&clk_lcd, "dev:clcd", NULL),
@@ -467,6 +430,7 @@ void __init lpc18xx_clock_init(void)
 	switch (platform) {
 	case PLATFORM_LPC18XX_HITEX_LPC4350_EVAL:
 	case PLATFORM_LPC18XX_HITEX_LPC1850_EVAL:
+	case PLATFORM_LPC18XX_EA_LPC4357_EVAL:
 		extosc = 12000000;	/* 12 MHz */
 		break;
 	default:
@@ -528,6 +492,18 @@ void __init lpc18xx_clock_init(void)
 #endif
 #if defined (CONFIG_LPC18XX_I2C1)
 	clk_i2c1.rate = clock_val[CLOCK_PCLK];
+#endif
+#if defined (CONFIG_LPC18XX_I2S0)
+	LPC18XX_CGU->apll_clk = LPC18XX_CGU_CLKSEL_PLL0AUDIO;
+	clk_i2s0.rate = 1;
+#endif
+
+	clk_dmac.rate = clock_val[CLOCK_PCLK];
+
+#if defined (CONFIG_LPC18XX_MMC)
+	LPC18XX_CGU->sdio_clk = LPC18XX_CGU_CLKSEL_PLL1 |
+			LPC18XX_CGU_PLL1CTRL_AUTOBLOCK_MSK;
+	clk_sdio.rate = pll1_out;
 #endif
 
 	/*

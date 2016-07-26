@@ -225,6 +225,12 @@
 /* Macro for loading transfer size */
 #define DMAC_CHAN_TRANSFER_SIZE(n)  ((n) & 0xFFF)
 
+/* Macro for AHB0/AHB1 source */
+#define DMAC_CHAN_SRC_AHB1	_BIT(24)
+
+/* Macro for AHB0/AHB1 destination */
+#define DMAC_CHAN_DST_AHB1	_BIT(25)
+
 /**********************************************************************
 * config_ch register definitions
 **********************************************************************/
@@ -279,7 +285,7 @@
 * `34.4.2.3 DMA request connections` of the LPC178x/7x User Manual.
 **********************************************************************/
 #define DMA_PERID_SDCARD            1
-#define DMA_PERID_I2S0_DMA0		6
-#define DMA_PERID_I2S0_DMA1		7
+#define DMA_PERID_I2S0_DMA0		9
+#define DMA_PERID_I2S0_DMA1		10
 
 #endif /* _MACH_LPC178X_DMAC_H_ */

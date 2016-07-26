@@ -42,6 +42,8 @@
 /* USART6 is available only on STM32F2 */
 #ifndef CONFIG_ARCH_STM32F1
 #define STM32_USART6_APBX	STM32_APB2PERITH_BASE
+#define STM32_USART7_APBX	STM32_APB1PERITH_BASE
+#define STM32_USART8_APBX	STM32_APB1PERITH_BASE
 #endif
 
 /* Different offsets on STM32F1 and STM32F2 */
@@ -58,6 +60,8 @@
 /* USART6 is available only on STM32F2 */
 #ifndef CONFIG_ARCH_STM32F1
 #define STM32_USART6_OFFS	0x1400
+#define STM32_USART7_OFFS	0x7800
+#define STM32_USART8_OFFS	0x7C00
 #endif
 
 /*
@@ -69,6 +73,8 @@
 #define STM32_USART4_BASE	(STM32_USART4_APBX + STM32_USART4_OFFS)
 #define STM32_USART5_BASE	(STM32_USART5_APBX + STM32_USART5_OFFS)
 #define STM32_USART6_BASE	(STM32_USART6_APBX + STM32_USART6_OFFS)
+#define STM32_USART7_BASE	(STM32_USART7_APBX + STM32_USART7_OFFS)
+#define STM32_USART8_BASE	(STM32_USART8_APBX + STM32_USART8_OFFS)
 
 /*
  * USART used for early printks and in uncompress.h. Note, it's supposed
@@ -77,6 +83,9 @@
  */
 #ifdef CONFIG_ARCH_STM32F1
 /* STM32F1 hardware reference is the SwissEmbedded Comm board */
+#define STM32_DBG_USART_BASE	STM32_USART1_BASE
+#elif defined (CONFIG_ARCH_STM32F7)
+/* STM32F7 hardware reference is the STM32F7-SOM board */
 #define STM32_DBG_USART_BASE	STM32_USART1_BASE
 #else
 /* STM32F2 hardware reference is the STM3220G-EVAL board */
@@ -87,15 +96,25 @@
  * SR bit masks (these are only those, which used in debug/uncompress code
  * also; see stm32_usart.c for the others)
  */
+#if defined(CONFIG_ARCH_STM32F7)
+#define STM32_USART_ISR_CTS	(1 << 10)	/* Clear to send	     */
+#define STM32_USART_ISR_TXE	(1 << 7)	/* Transmit data reg empty   */
+#else
 #define STM32_USART_SR_CTS	(1 << 9)	/* Clear to send	     */
 #define STM32_USART_SR_TXE	(1 << 7)	/* Transmit data reg empty   */
+#endif
 
 
 /*
  * Register offsets for use in debug-asm, and uncompress prints
  */
+#if defined(CONFIG_ARCH_STM32F7)
+#define STM32_UART_ISR		28
+#define STM32_UART_TDR		40
+#else
 #define STM32_UART_SR		0
 #define STM32_UART_DR		4
+#endif
 
 #ifndef __ASSEMBLY__
 

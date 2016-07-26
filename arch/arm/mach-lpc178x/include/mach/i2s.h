@@ -44,6 +44,10 @@
 #define I2S_IRQ(x)			(x + 0x1C)
 #define I2S_TX_RATE(x)			(x + 0x20)
 #define I2S_RX_RATE(x)			(x + 0x24)
+#define I2S_TX_BITRATE(x)		(x + 0x28)
+#define I2S_RX_BITRATE(x)		(x + 0x2C)
+#define I2S_TX_MODE(x)			(x + 0x30)
+#define I2S_RX_MODE(x)			(x + 0x34)
 
 /**********************************************************************
 * i2s_daO i2s_dai register definitions

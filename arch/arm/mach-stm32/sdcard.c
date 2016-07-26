@@ -1,5 +1,5 @@
 /*
- * (C) Copyright 2012,2013
+ * (C) Copyright 2012-2015
  * Emcraft Systems, <www.emcraft.com>
  * Alexander Potashev <aspotashev@emcraft.com>
  * Vladimir Khusainov <vlad@emcraft.com>
@@ -75,11 +75,7 @@ static unsigned int mmc_card_detect(struct device *dev)
 static struct mmci_platform_data stm32_mci_data = {
 	.ios_handler = stm32_ios_handler,
 	.ocr_mask = MMC_VDD_32_33 | MMC_VDD_33_34,
-#ifdef CONFIG_STM32_SD_DMA
 	.f_max = 25000000,
-#else
-	.f_max = 400000,
-#endif /* CONFIG_STM32_SD_DMA */
 	.capabilities = MMC_CAP_4_BIT_DATA,
 	.gpio_cd = -1,
 	.gpio_wp = -1,
@@ -102,6 +98,9 @@ void __init stm32_sdcard_init(void)
 	switch (platform) {
 	case PLATFORM_STM32_STM3220G_EVAL:
 	case PLATFORM_STM32_STM3240G_EVAL:
+	case PLATFORM_STM32_STM_STM32F439_SOM:
+	case PLATFORM_STM32_STM_STM32F7_SOM:
+	case PLATFORM_STM32_STM32F7_DISCO:
 		have_sd = 1;
 		break;
 	default:
@@ -115,7 +114,7 @@ void __init stm32_sdcard_init(void)
 	 * Register the SD card interface of STM32
 	 */
 	amba_ahb_device_add(
-		NULL, "mmci0",
+		NULL, "mmci-pl18x",
 		STM32_SD_BASE, STM32_SD_SIZE, STM32_SD_IRQ, NO_IRQ,
 		&stm32_mci_data, U8500_SDI_V2_PERIPHID);
 

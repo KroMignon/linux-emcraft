@@ -42,6 +42,8 @@
 #define STM32F2_GPIOG_BASE	(STM32_AHB1PERITH_BASE + 0x1800)
 #define STM32F2_GPIOH_BASE	(STM32_AHB1PERITH_BASE + 0x1C00)
 #define STM32F2_GPIOI_BASE	(STM32_AHB1PERITH_BASE + 0x2000)
+#define STM32F4_GPIOJ_BASE	(STM32_AHB1PERITH_BASE + 0x2400)
+#define STM32F4_GPIOK_BASE	(STM32_AHB1PERITH_BASE + 0x2800)
 
 /*
  * STM32F2/F4 GPIO control and status registers
@@ -63,5 +65,12 @@ struct stm32f2_gpio_regs {
  * Initialize the GPIO subsystem
  */
 void __init stm32_iomux_init(void);
+
+/*
+ * USB is a special case since USB may be compiled as modules, so
+ * the appropriate CONFIG_STM_USB_OTG_xS will be undefined
+ */
+void stm32_iomux_usb_fs_init(void);
+void stm32_iomux_usb_hs_init(void);
 
 #endif	/*_MACH_STM32_IOMUX_H_ */

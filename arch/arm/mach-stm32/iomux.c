@@ -1,5 +1,5 @@
 /*
- * (C) Copyright 2011-2013
+ * (C) Copyright 2011-2015
  * Emcraft Systems, <www.emcraft.com>
  * Yuri Tikhonov <yur@emcraft.com>
  * Alexander Potashev <aspotashev@emcraft.com>
@@ -32,6 +32,7 @@
 #include <mach/iomux.h>
 #include <mach/platform.h>
 #include <mach/stm32.h>
+#include <mach/fb.h>
 
 /*
  * GPIO configuration mode
@@ -68,6 +69,7 @@
 #define STM32F2_GPIO_AF_I2C1	0x04
 #define STM32F2_GPIO_AF_I2C2	0x04
 #define STM32F2_GPIO_AF_I2C3	0x04
+#define STM32F2_GPIO_AF_I2C4	0x04
 
 /*
  * SPI AF
@@ -88,6 +90,13 @@
 #define STM32F2_GPIO_AF_USART4	0x08
 #define STM32F2_GPIO_AF_USART5	0x08
 #define STM32F2_GPIO_AF_USART6	0x08
+#define STM32F2_GPIO_AF_USART7	0x08
+#define STM32F2_GPIO_AF_USART8	0x08
+
+/*
+* AF10 selection
+*/
+#define STM32F2_GPIO_AF_USB_OTG	0x0A
 
 /*
  * MAC AF
@@ -105,7 +114,13 @@
 #define STM32F2_GPIO_AF_SDIO	0x0C
 
 /*
+ * LTDC AF
+ */
+#define STM32F2_GPIO_AF_LTDC	0x0E
+
+/*
  * GPIO roles (alternative functions); role determines by whom GPIO is used
+ * WARNING: enums must be in sync with af_val[]!
  */
 enum stm32f2_gpio_role {
 	STM32F2_GPIO_ROLE_USART1,	/* USART1			      */
@@ -114,6 +129,8 @@ enum stm32f2_gpio_role {
 	STM32F2_GPIO_ROLE_USART4,	/* USART4			      */
 	STM32F2_GPIO_ROLE_USART5,	/* USART5			      */
 	STM32F2_GPIO_ROLE_USART6,	/* USART6			      */
+	STM32F2_GPIO_ROLE_USART7,	/* USART7			      */
+	STM32F2_GPIO_ROLE_USART8,	/* USART8			      */
 	STM32F2_GPIO_ROLE_ETHERNET,	/* MAC				      */
 	STM32F2_GPIO_ROLE_SPI1,		/* SPI1				      */
 	STM32F2_GPIO_ROLE_SPI2,		/* SPI2				      */
@@ -124,10 +141,14 @@ enum stm32f2_gpio_role {
 	STM32F2_GPIO_ROLE_I2C1,		/* I2C1				      */
 	STM32F2_GPIO_ROLE_I2C2,		/* I2C2				      */
 	STM32F2_GPIO_ROLE_I2C3,		/* I2C3				      */
+	STM32F2_GPIO_ROLE_I2C4,		/* I2C4				      */
 	STM32F2_GPIO_ROLE_SDIO,		/* SDIO				      */
+	STM32F2_GPIO_ROLE_USB_OTG,	/* USB OTG			      */
+	STM32F2_GPIO_ROLE_LTDC,		/* LCD controller		      */
 	STM32F2_GPIO_ROLE_MCO,		/* MC external output clock	      */
 	STM32F2_GPIO_ROLE_OUT,		/* General purpose output	      */
-	STM32F2_GPIO_ROLE_IN		/* General purpose input	      */
+	STM32F2_GPIO_ROLE_IN,		/* General purpose input no pull      */
+	STM32F2_GPIO_ROLE_IN_PUP	/* General purpose input w/pullup     */
 };
 
 /*
@@ -144,7 +165,8 @@ struct stm32f2_gpio_dsc {
 static const unsigned long stm32_gpio_base[] = {
 	STM32F2_GPIOA_BASE, STM32F2_GPIOB_BASE, STM32F2_GPIOC_BASE,
 	STM32F2_GPIOD_BASE, STM32F2_GPIOE_BASE, STM32F2_GPIOF_BASE,
-	STM32F2_GPIOG_BASE, STM32F2_GPIOH_BASE, STM32F2_GPIOI_BASE
+	STM32F2_GPIOG_BASE, STM32F2_GPIOH_BASE, STM32F2_GPIOI_BASE,
+	STM32F4_GPIOJ_BASE, STM32F4_GPIOK_BASE,
 };
 
 /*
@@ -153,11 +175,13 @@ static const unsigned long stm32_gpio_base[] = {
 static const u32 af_val[] = {
 	STM32F2_GPIO_AF_USART1, STM32F2_GPIO_AF_USART2, STM32F2_GPIO_AF_USART3,
 	STM32F2_GPIO_AF_USART4, STM32F2_GPIO_AF_USART5, STM32F2_GPIO_AF_USART6,
-	STM32F2_GPIO_AF_MAC, 
+	STM32F2_GPIO_AF_USART7, STM32F2_GPIO_AF_USART8, STM32F2_GPIO_AF_MAC,
 	STM32F2_GPIO_AF_SPI1, STM32F2_GPIO_AF_SPI2, STM32F2_GPIO_AF_SPI3,
 	STM32F2_GPIO_AF_SPI4, STM32F2_GPIO_AF_SPI5, STM32F2_GPIO_AF_SPI6,
 	STM32F2_GPIO_AF_I2C1, STM32F2_GPIO_AF_I2C2, STM32F2_GPIO_AF_I2C3,
-	STM32F2_GPIO_AF_SDIO,
+	STM32F2_GPIO_AF_I2C4,
+	STM32F2_GPIO_AF_SDIO, STM32F2_GPIO_AF_USB_OTG,
+	STM32F2_GPIO_AF_LTDC,
 	0
 };
 
@@ -165,8 +189,8 @@ static const u32 af_val[] = {
  * Configure the specified GPIO for the specified role
  */
 #ifndef CONFIG_ARCH_STM32F1
-static int stm32f2_gpio_config(struct stm32f2_gpio_dsc *dsc,
-			       enum stm32f2_gpio_role role)
+static int stm32f2_gpio_config(
+	struct stm32f2_gpio_dsc *dsc, enum stm32f2_gpio_role role)
 {
 	volatile struct stm32f2_gpio_regs	*gpio_regs;
 
@@ -176,7 +200,9 @@ static int stm32f2_gpio_config(struct stm32f2_gpio_dsc *dsc,
 	/*
 	 * Check params
 	 */
-	if (!dsc || dsc->port > 8 || dsc->pin > 15) {
+	if (!dsc || dsc->port >= ARRAY_SIZE(stm32_gpio_base) || dsc->pin > 15) {
+		printk(KERN_WARNING "%s: bad I/O {%d,%d}\n", __func__,
+			dsc ? dsc->port : -1, dsc ? dsc->pin : -1);
 		rv = -EINVAL;
 		goto out;
 	}
@@ -185,12 +211,15 @@ static int stm32f2_gpio_config(struct stm32f2_gpio_dsc *dsc,
 	 * Depending on the role, select the appropriate io params
 	 */
 	switch (role) {
+
 	case STM32F2_GPIO_ROLE_USART1:
 	case STM32F2_GPIO_ROLE_USART2:
 	case STM32F2_GPIO_ROLE_USART3:
 	case STM32F2_GPIO_ROLE_USART4:
 	case STM32F2_GPIO_ROLE_USART5:
 	case STM32F2_GPIO_ROLE_USART6:
+	case STM32F2_GPIO_ROLE_USART7:
+	case STM32F2_GPIO_ROLE_USART8:
 	case STM32F2_GPIO_ROLE_SPI1:
 	case STM32F2_GPIO_ROLE_SPI2:
 	case STM32F2_GPIO_ROLE_SPI3:
@@ -204,10 +233,12 @@ static int stm32f2_gpio_config(struct stm32f2_gpio_dsc *dsc,
 	case STM32F2_GPIO_ROLE_I2C1:
 	case STM32F2_GPIO_ROLE_I2C2:
 	case STM32F2_GPIO_ROLE_I2C3:
+	case STM32F2_GPIO_ROLE_I2C4:
 		otype  = STM32F2_GPIO_OTYPE_OD;
 		ospeed = STM32F2_GPIO_SPEED_2M;
 		pupd   = STM32F2_GPIO_PUPD_UP;
 		break;
+	case STM32F2_GPIO_ROLE_USB_OTG:
 	case STM32F2_GPIO_ROLE_ETHERNET:
 	case STM32F2_GPIO_ROLE_MCO:
 		otype  = STM32F2_GPIO_OTYPE_PP;
@@ -215,6 +246,7 @@ static int stm32f2_gpio_config(struct stm32f2_gpio_dsc *dsc,
 		pupd   = STM32F2_GPIO_PUPD_NO;
 		break;
 	case STM32F2_GPIO_ROLE_SDIO:
+	case STM32F2_GPIO_ROLE_LTDC:
 		otype  = STM32F2_GPIO_OTYPE_PP;
 		ospeed = STM32F2_GPIO_SPEED_50M;
 		pupd   = STM32F2_GPIO_PUPD_NO;
@@ -223,6 +255,16 @@ static int stm32f2_gpio_config(struct stm32f2_gpio_dsc *dsc,
 		otype  = STM32F2_GPIO_OTYPE_PP;
 		ospeed = STM32F2_GPIO_SPEED_50M;
 		pupd   = STM32F2_GPIO_PUPD_NO;
+		break;
+	case STM32F2_GPIO_ROLE_IN:
+		otype  = STM32F2_GPIO_OTYPE_PP;
+		ospeed = STM32F2_GPIO_SPEED_50M;
+		pupd   = STM32F2_GPIO_PUPD_NO;
+		break;
+	case STM32F2_GPIO_ROLE_IN_PUP:
+		otype  = STM32F2_GPIO_OTYPE_PP;
+		ospeed = STM32F2_GPIO_SPEED_50M;
+		pupd   = STM32F2_GPIO_PUPD_UP;
 		break;
 	default:
 		rv = -EINVAL;
@@ -241,7 +283,8 @@ static int stm32f2_gpio_config(struct stm32f2_gpio_dsc *dsc,
 
 	if (role != STM32F2_GPIO_ROLE_MCO &&
 	    role != STM32F2_GPIO_ROLE_OUT &&
-	    role != STM32F2_GPIO_ROLE_IN) {
+	    role != STM32F2_GPIO_ROLE_IN &&
+	    role != STM32F2_GPIO_ROLE_IN_PUP) {
 
 		/*
 		 * Connect PXy to the specified controller (role)
@@ -270,6 +313,9 @@ static int stm32f2_gpio_config(struct stm32f2_gpio_dsc *dsc,
 	else if (role == STM32F2_GPIO_ROLE_IN) {
 		mode = STM32F2_GPIO_MODE_IN;
 	}
+	else if (role == STM32F2_GPIO_ROLE_IN_PUP) {
+		mode = STM32F2_GPIO_MODE_IN;
+	}
 	else {
 		mode = STM32F2_GPIO_MODE_AF;
 	}
@@ -295,6 +341,58 @@ out:
 #endif /* !CONFIG_ARCH_STM32F1 */
 
 /*
+ * USB is a special case since USB may be compiled as modules, so
+ * the appropriate CONFIG_STM_USB_OTG_xS will be undefined
+ */
+void stm32_iomux_usb_fs_init(void)
+{
+	static struct stm32f2_gpio_dsc otg_gpio[] = {
+		{0, 11}, {0, 12}, {0, 9}
+	};
+	int	i;
+
+	for (i = 0; i < ARRAY_SIZE(otg_gpio); i++) {
+		stm32f2_gpio_config(&otg_gpio[i],
+				    STM32F2_GPIO_ROLE_USB_OTG);
+	}
+}
+EXPORT_SYMBOL(stm32_iomux_usb_fs_init);
+
+void stm32_iomux_usb_hs_init(void)
+{
+	static struct stm32f2_gpio_dsc otg_gpio[] = {
+		{0, 5 }, /* CLK PA5 */
+		{2, 0 }, /* STP PC0 */
+		{7, 4 }, /* NXT PH4 */
+
+		{0, 3 }, /* DATA0 PA3  */
+		{1, 0 }, /* DATA1 PB0  */
+		{1, 1 }, /* DATA2 PB1  */
+		{1, 10}, /* DATA3 PB10 */
+		{1, 11}, /* DATA4 PB11 */
+		{1, 12}, /* DATA5 PB12 */
+		{1, 13}, /* DATA6 PB13 */
+		{1, 5 }, /* DATA7 PB5  */
+	};
+	int	i;
+
+	for (i = 0; i < ARRAY_SIZE(otg_gpio); i++) {
+		stm32f2_gpio_config(&otg_gpio[i],
+				    STM32F2_GPIO_ROLE_USB_OTG);
+	}
+
+	/* configure ULPI_DIR */
+	if (stm32_platform_get() == PLATFORM_STM32_STM32F7_DISCO) {
+		struct stm32f2_gpio_dsc ulpi_dir = { 2, 2 };
+		stm32f2_gpio_config(&ulpi_dir, STM32F2_GPIO_ROLE_USB_OTG);
+	} else /* default */ {
+		struct stm32f2_gpio_dsc ulpi_dir = { 8, 11 };
+		stm32f2_gpio_config(&ulpi_dir, STM32F2_GPIO_ROLE_USB_OTG);
+	}
+}
+EXPORT_SYMBOL(stm32_iomux_usb_hs_init);
+
+/*
  * Initialize the GPIO Alternative Functions of the STM32.
  */
 void __init stm32_iomux_init(void)
@@ -315,6 +413,8 @@ void __init stm32_iomux_init(void)
 #ifndef CONFIG_ARCH_STM32F1
 	/* STM32F2-based platforms */
 	case PLATFORM_STM32_STM_STM32F439_SOM:
+	case PLATFORM_STM32_STM_STM32F7_SOM:
+	case PLATFORM_STM32_STM32F7_DISCO:
 
 #if defined(CONFIG_STM32_USART1)
 		gpio_dsc.port = 1;
@@ -324,6 +424,33 @@ void __init stm32_iomux_init(void)
 		gpio_dsc.port = 0;
 		gpio_dsc.pin  = 10;
 		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_USART1);
+#endif
+#if defined(CONFIG_STM32_USART3)
+		gpio_dsc.port = 2;
+		gpio_dsc.pin  = 10;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_USART3);
+
+		gpio_dsc.port = 2;
+		gpio_dsc.pin  = 11;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_USART3);
+#endif
+#if defined(CONFIG_STM32_USART6)
+		gpio_dsc.port = 2;
+		gpio_dsc.pin  = 6;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_USART6);
+
+		gpio_dsc.port = 2;
+		gpio_dsc.pin  = 7;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_USART6);
+#endif
+#if defined(CONFIG_STM32_USART7)
+		gpio_dsc.port = 5;
+		gpio_dsc.pin  = 7;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_USART7);
+
+		gpio_dsc.port = 5;
+		gpio_dsc.pin  = 6;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_USART7);
 #endif
 
 		goto uartdone;
@@ -373,7 +500,9 @@ uartdone:
 
 			if (platform == PLATFORM_STM32_STM_SOM ||
 			    platform == PLATFORM_STM32_STM_DISCO ||
-			    platform == PLATFORM_STM32_STM_STM32F439_SOM) {
+			    platform == PLATFORM_STM32_STM_STM32F439_SOM ||
+			    platform == PLATFORM_STM32_STM_STM32F7_SOM ||
+			    platform == PLATFORM_STM32_STM32F7_DISCO) {
 				for (i = 0; i < ARRAY_SIZE(rmii_gpio); i++) {
 					stm32f2_gpio_config(&rmii_gpio[i],
 						STM32F2_GPIO_ROLE_ETHERNET);
@@ -449,25 +578,54 @@ uartdone:
 #endif
 
 #if defined(CONFIG_STM32_I2C1)
-		gpio_dsc.port = 1;	/* SCL */
-		gpio_dsc.pin  = 9;
+		if (platform == PLATFORM_STM32_STM_STM32F439_SOM ||
+			platform == PLATFORM_STM32_STM_STM32F7_SOM) {
+			gpio_dsc.port = 1;	/* SCL */
+			gpio_dsc.pin  = 8;
+		}
+		else {
+			gpio_dsc.port = 1;	/* SCL */
+			gpio_dsc.pin  = 9;
+		}
 		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_I2C1);
 
-		gpio_dsc.port = 1;	/* SDA */
-		gpio_dsc.pin  = 8;
+		if (platform == PLATFORM_STM32_STM_STM32F439_SOM ||
+			platform == PLATFORM_STM32_STM_STM32F7_SOM) {
+			gpio_dsc.port = 1;	/* SDA */
+			gpio_dsc.pin  = 7;
+		}
+		else {
+			gpio_dsc.port = 1;	/* SDA */
+			gpio_dsc.pin  = 8;
+		}
 		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_I2C1);
 #endif
 #if defined(CONFIG_STM32_I2C2)
-#error		IOMUX for STM32 I2C2 undefined
+		gpio_dsc.port = 1;	/* SCL: PB10*/
+		gpio_dsc.pin  = 10;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_I2C2);
+
+		gpio_dsc.port = 1;	/* SDA: PB11*/
+		gpio_dsc.pin  = 11;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_I2C2);
 #endif
 #if defined(CONFIG_STM32_I2C3)
-		gpio_dsc.port = 0;	/* SCL */
+		gpio_dsc.port = 0;	/* SCL: PA8*/
 		gpio_dsc.pin  = 8;
 		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_I2C3);
 
-		gpio_dsc.port = 2;	/* SDA */
+		gpio_dsc.port = 2;	/* SDA: PC9*/
 		gpio_dsc.pin  = 9;
 		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_I2C3);
+#endif
+#if defined(CONFIG_STM32_I2C4)
+		gpio_dsc.port = 7;	/* SCL: PH11*/
+		gpio_dsc.pin  = 11;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_I2C4);
+
+		gpio_dsc.port = 7;	/* SDA: PH12*/
+		gpio_dsc.pin  = 12;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_I2C4);
 #endif
 
 #if defined(CONFIG_MMC_ARMMMCI) || defined(CONFIG_MMC_ARMMMCI_MODULE)
@@ -488,13 +646,38 @@ uartdone:
 #if defined(CONFIG_GPIOLIB) && defined(CONFIG_GPIO_SYSFS)
 
 	/*
-	 * Pin configuration for the User LED of the SOM-BSB-EXT baseboard.
+	 * Pin configuration for the user pushbutton and
+	 * the user LED of the SOM-BSB-EXT baseboard.
 	 * !!! That GPIO may have other connections on other baseboards.
 	 */
-	if (platform == PLATFORM_STM32_STM_SOM) {
+	if (platform == PLATFORM_STM32_STM_STM32F439_SOM) {
+		/* PE2 = User Push Button */
+		gpio_dsc.port = 4;
+		gpio_dsc.pin  = 2;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_IN_PUP);
 		/* PB2 = LED DS4 */
 		gpio_dsc.port = 1;
 		gpio_dsc.pin  = 2;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_OUT);
+	}
+	if (platform == PLATFORM_STM32_STM_STM32F7_SOM) {
+		/* PH2 = User Push Button */
+		gpio_dsc.port = 7;
+		gpio_dsc.pin  = 2;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_IN_PUP);
+		/* PB2 = LED DS4 */
+		gpio_dsc.port = 1;
+		gpio_dsc.pin  = 2;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_OUT);
+	}
+	if (platform == PLATFORM_STM32_STM32F7_DISCO) {
+		/* PI11 = User Push Button */
+		gpio_dsc.port = 8;
+		gpio_dsc.pin  = 11;
+		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_IN_PUP);
+		/* PI1 = LED LD1 */
+		gpio_dsc.port = 8;
+		gpio_dsc.pin  = 1;
 		stm32f2_gpio_config(&gpio_dsc, STM32F2_GPIO_ROLE_OUT);
 	}
 
@@ -520,6 +703,74 @@ uartdone:
 	}
 
 #endif /* CONFIG_GPIOLIB */
+
+#if defined(CONFIG_STM32_FB)
+		if (!stm32f4_fb_is_running()) {
+			static struct stm32f2_gpio_dsc lcd_gpio[] = {
+# if defined(CONFIG_ARCH_STM32F7)
+				{8, 14}, /* PI14 = LCD_CLK */
+				{10,7 }, /* PK7  = LCD_DE */
+				{8, 12}, /* PI12 = LCD_HSYNC */
+				{8, 13}, /* PI13 = LCD_VSYNC */
+				{9, 12}, /* PJ12 = LCD_B0 */
+				{9, 13}, /* PJ13 = LCD_B1 */
+				{9, 14}, /* PJ14 = LCD_B2 */
+				{9, 15}, /* PJ15 = LCD_B3 */
+				{10,3 }, /* PK3  = LCD_B4 */
+				{10,4 }, /* PK4  = LCD_B5 */
+				{10,5 }, /* PK5  = LCD_B6 */
+				{10,6 }, /* PK6  = LCD_B7 */
+				{9, 7 }, /* PJ7  = LCD_G0 */
+				{9, 8 }, /* PJ8  = LCD_G1 */
+				{9, 9 }, /* PJ9  = LCD_G2 */
+				{9, 10}, /* PJ10 = LCD_G3 */
+				{9, 11}, /* PJ11 = LCD_G4 */
+				{10,0 }, /* PK0  = LCD_G5 */
+				{10,1 }, /* PK1  = LCD_G6 */
+				{10,2 }, /* PK2  = LCD_G7 */
+				{8, 15}, /* PI15 = LCD_R0 */
+				{9, 0 }, /* PJ0  = CD_R1 */
+				{9, 1 }, /* PJ1  = LCD_R2 */
+				{9, 2 }, /* PJ2  = LCD_R3 */
+				{9, 3 }, /* PJ3  = LCD_R4 */
+				{9, 4 }, /* PJ4  = LCD_R5 */
+				{9, 5 }, /* PJ5  = LCD_R6 */
+				{9, 6 }, /* PJ6  = LCD_R7 */
+# else
+				{6, 7 }, /* PG7  = LCD_CLK */
+				{5, 10}, /* PF10 = LCD_DE */
+				{8, 10}, /* PI10 = LCD_HSYNC */
+				{8, 9 }, /* PI9  = LCD_VSYNC */
+				{6, 12}, /* PG12 = LCD_B1 */
+				{6, 10}, /* PG10 = LCD_B2 */
+				{8, 4 }, /* PI4  = LCD_B4 */
+				{8, 5 }, /* PI5  = LCD_B5 */
+				{8, 6 }, /* PI6  = LCD_B6 */
+				{8, 7 }, /* PI7  = LCD_B7 */
+				{7, 13}, /* PH13 = LCD_G2 */
+				{7, 14}, /* PH14 = LCD_G3 */
+				{7, 15}, /* PH15 = LCD_G4 */
+				{8, 0 }, /* PI0  = LCD_G5 */
+				{2, 7 }, /* PC7  = LCD_G6 */
+				{8, 2 }, /* PI2  = LCD_G7 */
+				{7, 2 }, /* PH2  = LCD_R0 */
+				{7, 3 }, /* PH3  = LCD_R1 */
+				{7, 8 }, /* PH8  = LCD_R2 */
+				{7, 9 }, /* PH9  = LCD_R3 */
+				{7, 10}, /* PH10 = LCD_R4 */
+				{7, 11}, /* PH11 = LCD_R5 */
+				{7, 12}, /* PH12 = LCD_R6 */
+				{6, 6 }, /* PG6  = LCD_R7 */
+# endif
+			};
+			int i;
+
+			for (i = 0; i < ARRAY_SIZE(lcd_gpio); i++) {
+				stm32f2_gpio_config(&lcd_gpio[i],
+						    STM32F2_GPIO_ROLE_LTDC);
+			}
+		}
+#endif /* CONFIG_STM32_FB */
 
 		break;
 #else

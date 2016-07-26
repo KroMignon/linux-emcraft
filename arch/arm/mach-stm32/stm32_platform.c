@@ -1,5 +1,5 @@
 /*
- * (C) Copyright 2011-2013
+ * (C) Copyright 2011-2015
  * Emcraft Systems, <www.emcraft.com>
  * Yuri Tikhonov <yur@emcraft.com>
  * Alexander Potashev <aspotashev@emcraft.com>
@@ -42,7 +42,16 @@
 #include <mach/sdcard.h>
 #include <mach/dmainit.h>
 #include <mach/rtc.h>
+#include <mach/usb.h>
 #include <mach/gpio.h>
+#include <mach/fb.h>
+#include <mach/i2c-gpio.h>
+
+/*
+ * Linker symbols
+ */
+extern char _sram_start;
+extern char __sram_loc, _esram_loc;
 
 /*
  * Prototypes
@@ -61,6 +70,12 @@ static int stm32_platform = PLATFORM_STM32_SWISSEMBEDDED_COMM;
 /* STM32F2 default platform */
 static int stm32_platform = PLATFORM_STM32_STM3220G_EVAL;
 #endif
+
+/*
+ * Number of usb device controllers registered so far
+ */
+int stm32_udc_num;
+EXPORT_SYMBOL(stm32_udc_num);
 
 /*
  * Data structure for the timer system.
@@ -93,7 +108,7 @@ int stm32_device_get(void)
 		r = DEVICE_STM32F103ZE;
 		break;
 #else
-	/* STM32F2-based platforms */
+	/* STM32F2-, STM32F4- and STM32F7-based platforms */
 	case PLATFORM_STM32_STM3220G_EVAL:
 		r = DEVICE_STM32F207IG;
 		break;
@@ -106,6 +121,10 @@ int stm32_device_get(void)
 	case PLATFORM_STM32_STM_STM32F439_SOM:
 	case PLATFORM_STM32_STM_DISCO:
 		r = DEVICE_STM32F439II;
+		break;
+	case PLATFORM_STM32_STM_STM32F7_SOM:
+	case PLATFORM_STM32_STM32F7_DISCO:
+		r = DEVICE_STM32F746NG;
 		break;
 #endif
 	default:
@@ -138,12 +157,17 @@ static int __init stm32_platform_parse(char *s)
 		stm32_platform = PLATFORM_STM32_STM_SOM;
 	else if (!strcmp(s, "stm32f4x9-som"))
 		stm32_platform = PLATFORM_STM32_STM_STM32F439_SOM;
+	else if (!strcmp(s, "stm32f7-som"))
+		stm32_platform = PLATFORM_STM32_STM_STM32F7_SOM;
+	else if (!strcmp(s, "stm32f7-disco"))
+		stm32_platform = PLATFORM_STM32_STM32F7_DISCO;
 	else if (!strcmp(s, "stm-disco"))
 		stm32_platform = PLATFORM_STM32_STM_DISCO;
 #endif
 
 	return 1;
 }
+
 __setup("stm32_platform=", stm32_platform_parse);
 
 /*
@@ -187,10 +211,26 @@ static void __init stm32_init_irq(void)
 }
 
 /*
+ * If we have to execute some code from SRAM, then relocate it
+ */
+static void stm32_sram_relocate(void)
+{
+	if (&_esram_loc != &__sram_loc) {
+		memcpy((void*)&_sram_start, (void*)&__sram_loc,
+			&_esram_loc - &__sram_loc);
+	}
+}
+
+/*
  * STM32 plaform initialization.
  */
 static void __init stm32_init(void)
 {
+	/*
+	 * Relocate SRAM code
+	 */
+	stm32_sram_relocate();
+
 	/*
 	 * Configure the IOMUXes of STM32
 	 */
@@ -224,7 +264,7 @@ static void __init stm32_init(void)
 	stm32_spi_init();
 #endif
 
-#if defined(CONFIG_I2C_STM32)
+#if defined(CONFIG_I2C_STM32) || defined(CONFIG_I2C_STM32F7)
 	/*
 	 * Configure the STM32 I2C devices
 	 */
@@ -252,10 +292,38 @@ static void __init stm32_init(void)
 	stm32_rtc_init();
 #endif
 
+#if defined(CONFIG_STM32_USB_OTG_FS)
+       /*
+        * Initialize the USB OTG FS controller
+        */
+       stm32_usb_otg_fs_init();
+#endif
+
+#if defined(CONFIG_STM32_USB_OTG_HS)
+       /*
+        * Initialize the USB OTG HS controller
+        */
+       stm32_usb_otg_hs_init();
+#endif
+
 #if defined(CONFIG_GPIOLIB)
 	/*
 	 * Register the MCU GPIO chip
 	 */
 	stm32_gpio_init();
+#endif
+
+#if defined(CONFIG_I2C_GPIO)
+	/*
+	 * Bit-bang GPIO I2C implementation
+	 */
+	stm32_i2c_gpio_init();
+#endif
+
+#if defined(CONFIG_STM32_FB)
+	/*
+	 * Register LCD controller with the framebuffer driver
+	 */
+	stm32f4x9_fb_init();
 #endif
 }

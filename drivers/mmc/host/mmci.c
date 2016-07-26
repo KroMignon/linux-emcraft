@@ -86,7 +86,7 @@ static struct sddrv_dmac_data dmac_drvdat;
 #define MCI_IRQENABLE \
 	(MCI_CMDCRCFAILMASK | MCI_DATACRCFAILMASK | MCI_CMDTIMEOUTMASK | \
 	MCI_DATATIMEOUTMASK | MCI_TXUNDERRUNMASK | MCI_RXOVERRUNMASK| \
-	MCI_CMDRESPENDMASK | MCI_CMDSENTMASK | MCI_DATAENDMASK)
+	MCI_CMDRESPENDMASK | MCI_CMDSENTMASK | MCI_DATAENDMASK | MCI_STARTBITERR)
 
 #endif /* CONFIG_LPC178X_SD_DMA || CONFIG_STM32_SD_DMA */
 
@@ -558,10 +558,13 @@ static struct variant_data variant_ux500 = {
 	.fifosize		= 30 * 4,
 	.fifohalfsize		= 8 * 4,
 	.clkreg			= MCI_CLK_ENABLE,
-#if defined(CONFIG_STM32_SD_DMA)
+#if defined(CONFIG_STM32_SD_DMA) && !defined(CONFIG_ARCH_STM32F7)
 	/*
 	 * On STM32, do not use HW flow control as recommended
 	 * in the STM32F20x/STM32F21x errata sheet.
+	 * STM32F7 errata sheet does not list this issue and
+	 * it sometimes fails due TX FIFO underrun condition without the
+	 * flow control, so we enable the flow control for STM32F7.
 	 */
 	.clkreg_enable		= 0,
 #else
@@ -630,6 +633,15 @@ static void mmci_set_clkreg(struct mmci_host *host, unsigned int desired)
 static void
 mmci_request_end(struct mmci_host *host, struct mmc_request *mrq)
 {
+	/*
+	 * Add minimal delay to ensure that MMCICOMMAND is accessed
+	 * with no violation of this rule from the STM32F7 manual:
+	 * "After a data write, data cannot be written to this register
+	 * for three SDMMCCLK (48 MHz) clock periods plus two PCLK2
+	 * clock periods."
+	 */
+	udelay(1);
+
 	writel(0, host->base + MMCICOMMAND);
 
 	BUG_ON(host->data);
@@ -806,12 +818,14 @@ mmci_data_irq(struct mmci_host *host, struct mmc_data *data,
 	}
 #endif /* CONFIG_LPC178X_SD_DMA || CONFIG_STM32_SD_DMA */
 
-	if (status & (MCI_DATACRCFAIL|MCI_DATATIMEOUT|MCI_TXUNDERRUN|MCI_RXOVERRUN)) {
+	if (status & (MCI_DATACRCFAIL|MCI_DATATIMEOUT|MCI_TXUNDERRUN|MCI_RXOVERRUN|MCI_STARTBITERR)) {
 		dev_dbg(mmc_dev(host->mmc), "MCI ERROR IRQ (status %08x)\n", status);
 		if (status & MCI_DATACRCFAIL)
 			data->error = -EILSEQ;
 		else if (status & MCI_DATATIMEOUT)
 			data->error = -ETIMEDOUT;
+		else if (status & MCI_STARTBITERR)
+			data->error = -EAGAIN;
 		else if (status & (MCI_TXUNDERRUN|MCI_RXOVERRUN))
 			data->error = -EIO;
 		status |= MCI_DATAEND;
@@ -833,7 +847,7 @@ mmci_data_irq(struct mmci_host *host, struct mmc_data *data,
 		}
 	}
 
-	if (status & MCI_DATAEND) {
+	if (status & (MCI_DATAEND|MCI_DATABLOCKEND)) {
 #if defined(CONFIG_LPC178X_SD_DMA) || defined(CONFIG_STM32_SD_DMA)
 		if (data->flags & MMC_DATA_READ) {
 #if defined(CONFIG_LPC178X_SD_DMA)
@@ -1081,7 +1095,8 @@ static irqreturn_t mmci_irq(int irq, void *dev_id)
 		status = readl(host->base + MMCISTATUS);
 
 		if (host->singleirq) {
-			if (status & readl(host->base + MMCIMASK1))
+			if (status &
+				(readl(host->base + MMCIMASK0) & MCI_IRQ1MASK))
 				mmci_pio_irq(irq, dev_id);
 
 			status &= ~MCI_IRQ1MASK;
@@ -1098,7 +1113,7 @@ static irqreturn_t mmci_irq(int irq, void *dev_id)
 
 		data = host->data;
 		if (status & (MCI_DATACRCFAIL|MCI_DATATIMEOUT|MCI_TXUNDERRUN|
-			      MCI_RXOVERRUN|MCI_DATAEND|MCI_DATABLOCKEND) && data)
+			      MCI_RXOVERRUN|MCI_DATAEND|MCI_DATABLOCKEND|MCI_STARTBITERR) && data)
 			mmci_data_irq(host, data, status);
 
 		cmd = host->cmd;
@@ -1430,10 +1445,18 @@ static int __devinit mmci_probe(struct amba_device *dev, struct amba_id *id)
 	 */
 	mmc->max_blk_size = 2048;
 
+#if defined(CONFIG_LPC178X_SD_DMA) || defined(CONFIG_STM32_SD_DMA)
 	/*
 	 * No limit on the number of blocks transferred.
 	 */
 	mmc->max_blk_count = mmc->max_req_size;
+#else
+	/*
+	 * Some SD cards fail to be read in PIO mode with multiple block
+	 * transactions
+	 */
+	mmc->max_blk_count = 1;
+#endif
 
 #if defined(CONFIG_LPC178X_SD_DMA) || defined(CONFIG_STM32_SD_DMA)
 	/*

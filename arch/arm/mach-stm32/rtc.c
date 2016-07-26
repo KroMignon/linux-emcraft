@@ -26,16 +26,9 @@
 #include <linux/platform_device.h>
 
 #include <mach/stm32.h>
+#include <mach/platform.h>
 #include <mach/rtc.h>
 #include <mach/exti.h>
-
-/*
- * Power Control module (PWR) register map
- */
-struct stm32f2_pwr_regs {
-	u32 cr;		/* PWR power control register */
-	u32 csr;	/* PWR power control/status register */
-};
 
 /*
  * PWR power control register
@@ -52,6 +45,14 @@ struct stm32f2_pwr_regs {
 #define STM32F2_RCC_BDCR_RTCSEL_BITS	8
 #define STM32F2_RCC_BDCR_RTCSEL_MSK	(3 << STM32F2_RCC_BDCR_RTCSEL_BITS)
 #define STM32F2_RCC_BDCR_RTCSEL_LSE	(1 << STM32F2_RCC_BDCR_RTCSEL_BITS)
+/* LSE Drive bits, STM32F7 only */
+#define STM32F2_RCC_BDCR_LSEDRV_BITS	3
+#define STM32F2_RCC_BDCR_LSEDRV_MSK	(3 << STM32F2_RCC_BDCR_LSEDRV_BITS)
+#define STM32F2_RCC_BDCR_LSEDRV_LOW	(0 << STM32F2_RCC_BDCR_LSEDRV_BITS)
+#define STM32F2_RCC_BDCR_LSEDRV_MEDHI	(1 << STM32F2_RCC_BDCR_LSEDRV_BITS)
+#define STM32F2_RCC_BDCR_LSEDRV_MEDLO	(2 << STM32F2_RCC_BDCR_LSEDRV_BITS)
+#define STM32F2_RCC_BDCR_LSEDRV_HIGH	STM32F2_RCC_BDCR_LSEDRV_MSK
+
 /* External low-speed oscillator ready */
 #define STM32F2_RCC_BDCR_LSERDY_MSK	(1 << 1)
 /*  External low-speed oscillator enable */
@@ -61,13 +62,6 @@ struct stm32f2_pwr_regs {
 #define STM32_RCC_ENR_PWREN		(1 << 28)
 
 #if defined(CONFIG_STM32_RTC)
-/*
- * PWR registers base
- */
-#define STM32F2_PWR_BASE		0x40007000
-#define STM32F2_PWR			((volatile struct stm32f2_pwr_regs *) \
-					STM32F2_PWR_BASE)
-
 static struct platform_device rtc_device = {
 	.name = "rtc-stm32f2",
 	.id   = -1,
@@ -83,10 +77,13 @@ void __init stm32_rtc_init(void)
 	STM32_RCC->apb1enr |= STM32_RCC_ENR_PWREN;
 
 	/* Allow access to RTC */
-	STM32F2_PWR->cr |= STM32F2_PWR_CR_DBP_MSK;
+	STM32_PWR->cr |= STM32F2_PWR_CR_DBP_MSK;
 
 	/* Disable the low-speed external oscillator */
 	STM32_RCC->bdcr = 0;
+	/* Wait till LSE is stopped */
+	while ((STM32_RCC->bdcr & STM32F2_RCC_BDCR_LSERDY_MSK));
+
 	/* Enable the low-speed external oscillator */
 	STM32_RCC->bdcr = STM32F2_RCC_BDCR_LSEON_MSK;
 
@@ -98,11 +95,19 @@ void __init stm32_rtc_init(void)
 		(STM32_RCC->bdcr & ~STM32F2_RCC_BDCR_RTCSEL_MSK) |
 		STM32F2_RCC_BDCR_RTCSEL_LSE;
 
+	/* For STM32F7-SOM, change the default LSE drive strength */
+	if (stm32_platform_get() == PLATFORM_STM32_STM_STM32F7_SOM) {
+		STM32_RCC->bdcr & ~STM32F2_RCC_BDCR_LSEDRV_MSK;
+		STM32_RCC->bdcr |= STM32F2_RCC_BDCR_LSEDRV_MEDHI;
+	}
+
 	/* Enable the RTC */
 	STM32_RCC->bdcr |= STM32F2_RCC_BDCR_RTCEN_MSK;
 
 	/* Enable RTC event lines in the event controller (EXTI) */
+	stm32_exti_set_rising(STM32F2_EXTI_LINE_RTC_ALARM);
 	stm32_exti_enable_int(STM32F2_EXTI_LINE_RTC_ALARM, 1);
+	stm32_exti_set_rising(STM32F2_EXTI_LINE_RTC_WAKEUP);
 	stm32_exti_enable_int(STM32F2_EXTI_LINE_RTC_WAKEUP, 1);
 
 	/*

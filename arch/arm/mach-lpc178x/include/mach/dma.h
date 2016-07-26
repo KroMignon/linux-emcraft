@@ -57,10 +57,12 @@ struct dma_config {
 	int src_inc;	/* !0 = Enable source address increment */
 	int src_bsize;	/* Source burst size (ie, DMAC_CHAN_SRC_BURST_xxx) */
 	u32 src_prph;	/* Source peripheral (ie, DMA_PERID_xxxx) */
+	int src_ahb1;	/* Read source via AHB1 master */
 	int dst_size;	/* Destination xfer size - must be 1, 2, or 4 */
 	int dst_inc;	/* !0 = Enable destination address increment */
 	int dst_bsize;	/* Destination burst size (DMAC_CHAN_DEST_BURST_xxx) */
 	u32 dst_prph;	/* Destination peripheral (ie, DMA_PERID_xxxx) */
+	int dst_ahb1;	/* Write destination via AHB1 master */
 	u32 flowctrl;	/* Flow control (ie, DMAC_CHAN_FLOW_xxxxxx) */
 };
 

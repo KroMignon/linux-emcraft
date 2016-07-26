@@ -14,6 +14,15 @@ config ARCH_STM32F1
 	help
 	  Build kernel for the STMicro STM32F1 MCU instead of STM32F2
 
+config ARCH_STM32F7
+	bool "Support STM32F7"
+	default n
+	depends on ARCH_STM32 && !ARCH_STM32F1
+	select DMAMEM
+	select CPU_CACHE_V7M
+	help
+	  Build kernel for the STMicro STM32F7 MCU
+
 menu "STM32 I/O interfaces"
 	depends on ARCH_STM32
 
@@ -52,6 +61,16 @@ config STM32_USART6
 	bool "Enable STM32 USART6 port"
 	default n
 
+config STM32_USART7
+	depends on ARCH_STM32 && SERIAL_STM32 && !ARCH_STM32F1
+	bool "Enable STM32 USART7 port"
+	default n
+
+config STM32_USART8
+	depends on ARCH_STM32 && SERIAL_STM32 && !ARCH_STM32F1
+	bool "Enable STM32 USART8 port"
+	default n
+
 config STM32_MAC
 	depends on ARCH_STM32 && STM32_ETHER
 	bool "Enable STM32 Ethernet port"
@@ -88,18 +107,23 @@ config STM32_SPI6
 	default n
 
 config STM32_I2C1
-	depends on ARCH_STM32 && I2C_STM32
+	depends on ARCH_STM32 && (I2C_STM32 || I2C_STM32F7) && !I2C_GPIO
 	bool "Enable STM32 I2C1 port"
 	default n
 
 config STM32_I2C2
-	depends on ARCH_STM32 && I2C_STM32
+	depends on ARCH_STM32 && (I2C_STM32 || I2C_STM32F7)
 	bool "Enable STM32 I2C2 port"
 	default n
 
 config STM32_I2C3
-	depends on ARCH_STM32 && I2C_STM32
+	depends on ARCH_STM32 && (I2C_STM32 || I2C_STM32F7)
 	bool "Enable STM32 I2C3 port"
+	default n
+
+config STM32_I2C4
+	depends on I2C_STM32F7
+	bool "Enable STM32 I2C4 port"
 	default n
 
 config STM32_SD
@@ -115,6 +139,74 @@ config STM32_SD_DMA
 config STM32_RTC
 	depends on ARCH_STM32 && RTC_DRV_STM32F2
 	bool "Enable STM32 RTC"
+	default n
+
+config STM32_USB_OTG_FS
+	depends on ARCH_STM32 && USB_DWC2
+	tristate "Enable STM32 USB OTG FS"
+	default n
+
+choice
+	prompt "USB FS Role"
+	depends on STM32_USB_OTG_FS
+	help
+	  Integrated USB Full-Speed controller mode
+
+config STM32_USB_OTG_FS_HOST
+	bool "Host"
+	select USB_DWC2_HOST
+	select USB_DWC2_PLATFORM
+
+config STM32_USB_OTG_FS_DEVICE
+	bool "Device"
+	select USB_DWC2_PERIPHERAL
+	select USB_GADGET
+	select USB_GADGET_SELECTED
+
+endchoice
+
+config STM32_USB_OTG_HS
+	depends on ARCH_STM32 && USB_DWC2
+	tristate "Enable STM32 USB OTG HS"
+	default n
+
+choice
+	prompt "USB HS Role"
+	depends on STM32_USB_OTG_HS
+	help
+	  Integrated USB High-Speed controller mode
+
+config STM32_USB_OTG_HS_HOST
+	bool "Host"
+	select USB_DWC2_HOST
+	select USB_DWC2_PLATFORM
+
+config STM32_USB_OTG_HS_DEVICE
+	bool "Device"
+	select USB_DWC2_PERIPHERAL
+	select USB_GADGET
+	select USB_GADGET_SELECTED
+	select USB_GADGET_DUALSPEED
+
+endchoice
+
+config STM32_GPIO
+	depends on ARCH_STM32 && GPIOLIB
+	bool "Enable STM32 GPIO"
+	default y
+	help
+	  Include support for the STM32 GPIO
+
+config STM32_GPIO_INT
+	depends on STM32_GPIO
+	bool "Enable STM32 GPIO interrupts"
+	default y
+	help
+	  Include support for the STM32 GPIO interrupts
+
+config STM32_FB
+	depends on ARCH_STM32 && FB_STM32F4
+	bool "Enable STM32F4x9 LTDC framebuffer"
 	default n
 
 endmenu

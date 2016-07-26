@@ -1,5 +1,5 @@
 /*
- * (C) Copyright 2012-2013
+ * (C) Copyright 2012-2015
  * Emcraft Systems, <www.emcraft.com>
  * Alexander Potashev <aspotashev@emcraft.com>
  * Vladimir Khusainov <vlad@emcraft.com>
@@ -30,8 +30,11 @@
 #include <linux/module.h>
 #include <linux/errno.h>
 #include <linux/io.h>
+
 #include <mach/lpc18xx.h>
 #include <mach/platform.h>
+#include <mach/clock.h>
+#include <mach/gpio.h>
 
 /*
  * Bits and bit groups inside the SCU_SFS registers
@@ -79,34 +82,34 @@
 	(LPC18XX_IOMUX_CONFIG(func, 0, 0, 1, 0, 1))
 
 /*
- * GPIO ports registers map
+ * I2C0 configuration register
  */
-struct lpc18xx_gpio_regs {
-	u8 pbyte[256];		/* GPIO port byte pin registers */
-	u32 rsv0[960];
-	u32 pword[256];		/* GPIO port word pin registers */
-	u32 rsv1[768];
-	u32 dir[8];		/* GPIO port direction registers */
-	u32 rsv2[24];
-	u32 mask[8];		/* GPIO port mask registers */
-	u32 rsv3[24];
-	u32 pin[8];		/* GPIO port pin registers */
-	u32 rsv4[24];
-	u32 mpin[8];		/* GPIO masked port pin registers */
-	u32 rsv5[24];
-	u32 set[8];		/* GPIO port set registers */
-	u32 rsv6[24];
-	u32 clr[8];		/* GPIO port clear registers */
-	u32 rsv7[24];
-	u32 not[8];		/* GPIO port toggle registers */
-};
+#if defined(CONFIG_LPC18XX_I2C0)
+#define LPC18XX_SFSI2C0 ((u32 volatile *) (LPC18XX_SCU_BASE + 0xC84))
 
 /*
- * GPIO registers access handlers
+ * The I2C0 pins are configured using special SFSI2C0 register
+ * (see section 15.4.5 of User manual). SFSI2C0 register
+ * contains eight configuration bits: four for I2C0_SCL, and
+ * four for I2C0_SDA.  To configure I2C0 interface, we should
+ * set up the following values (also see Remark from the
+ * section 15.2 of UM):
+ *    bit | name | val | meaning
+ *    0/8 | EFP  |  0  | Glitch filter time: 0=50ns, 1=3ns
+ *    2/A | EHD  |  0  | I2C mode: 0=Standard/Fast, 1=Fast-mode
+ *    3/B | EZI  |  1  | 1=Enable the input receiver
+ *    7/F | ZIF  |  1  | Glitch filter: 0=Enable, 1=Disable
+ * The above configuration corresponds to the 0x8888 hex value.
  */
-#define LPC18XX_GPIO_BASE	0x400F4000
-#define LPC18XX_GPIO		((volatile struct lpc18xx_gpio_regs *) \
-					LPC18XX_GPIO_BASE)
+#define LPC18XX_SFSI2C0_CONFIG	0x8888
+#endif
+
+#if defined(CONFIG_FB_ARMCLCD)
+struct iomux_pin_config {
+	int group, pin;
+	u32 mask;
+};
+#endif /* CONFIG_FB_ARMCLCD */
 
 /*
  * 16 pin groups. Number of pins in each group is limited to 32.
@@ -125,10 +128,6 @@ struct lpc18xx_gpio_regs {
 #define LPC18XX_IOMUX_CLK_PINS		4
 
 /*
- * System Control Unit (SCU) registers base
- */
-#define LPC18XX_SCU_BASE	(LPC18XX_APB0PERIPH_BASE + 0x00006000)
-/*
  * Address of the SCU_SFS register for the given pin
  */
 #define LPC18XX_PIN_REG_ADDR(group,pin) \
@@ -138,28 +137,6 @@ struct lpc18xx_gpio_regs {
  */
 #define LPC18XX_PIN(group,pin) \
 	(*(volatile u32 *)LPC18XX_PIN_REG_ADDR(group,pin))
-
-/*
- * I2C0 configuration register
- */
-#if defined(CONFIG_LPC18XX_I2C0)
-#define LPC18XX_SFSI2C0 ((u32 volatile *) (LPC18XX_SCU_BASE + 0xC84))
-/*
- * The I2C0 pins are configured using special SFSI2C0 register
- * (see section 15.4.5 of User manual). SFSI2C0 register
- * contains eight configuration bits: four for I2C0_SCL, and
- * four for I2C0_SDA.  To configure I2C0 interface, we should
- * set up the following values (also see Remark from the
- * section 15.2 of UM):
- *    bit | name | val | meaning
- *    0/8 | EFP  |  0  | Glitch filter time: 0=50ns, 1=3ns
- *    2/A | EHD  |  0  | I2C mode: 0=Standard/Fast, 1=Fast-mode
- *    3/B | EZI  |  1  | 1=Enable the input receiver
- *    7/F | ZIF  |  1  | Glitch filter: 0=Enable, 1=Disable
- * The above configuration corresponds to the 0x8888 hex value.
- */
-#define LPC18XX_SFSI2C0_CONFIG	0x8888
-#endif
 
 /*
  * Check that the given (pin group, pin) pair is a valid LPC18xx pin.
@@ -185,7 +162,7 @@ static inline int lpc18xx_validate_pin(int group, int pin)
  * Configure the specified MCU pin.
  * Returns 0 on success, -EINVAL otherwise.
  */
-static int lpc18xx_pin_config(int group, int pin, u32 regval)
+int lpc18xx_pin_config(int group, int pin, u32 regval)
 {
 	int rv;
 
@@ -202,52 +179,18 @@ static int lpc18xx_pin_config(int group, int pin, u32 regval)
 
 	return rv;
 }
-
-/*
- * Set up direction of a GPIO: 1-> out; 0-> in
- */
-void lpc18xx_gpio_dir(int group, int pin, int dir)
-{
-	unsigned int v = LPC18XX_GPIO->dir[group];
-
-	if (dir) {
-		writel(v | (1 << pin), &LPC18XX_GPIO->dir[group]);
-		LPC18XX_GPIO->dir[group] = v | (1 << pin);
-	} else {
-		writel(v & ~(1 << pin), &LPC18XX_GPIO->dir[group]);
-	}
-}
-EXPORT_SYMBOL(lpc18xx_gpio_dir);
-
-/*
- * Define the value of a general-purpose output
- */
-void lpc18xx_gpio_out(int group, int pin, int c)
-{
-	unsigned int v;
-
-	if (c) {
-		v = readl(&LPC18XX_GPIO->set[group]);
-		writel(v | (1 << pin), &LPC18XX_GPIO->set[group]);
-	}
-	else {
-		v = readl(&LPC18XX_GPIO->clr[group]);
-		writel(v | (1 << pin), &LPC18XX_GPIO->clr[group]);
-	}
-}
-EXPORT_SYMBOL(lpc18xx_gpio_out);
+EXPORT_SYMBOL(lpc18xx_pin_config);
 
 /*
  * Set up IOMUX configuration of the various processor chips
  */
 void __init lpc18xx_iomux_init(void)
 {
-	int	p = lpc18xx_platform_get();
+	int p = lpc18xx_platform_get();
 
 	if (p == PLATFORM_LPC18XX_HITEX_LPC4350_EVAL) {
 
 #if defined(CONFIG_LPC18XX_SPI0)
-
 		/*
 		 * Tie the SPI Flash of Hitex EVAL LPC4350 to SSP0.
 		 * Note that CS is defined as a software-driven GPIO.
@@ -267,62 +210,140 @@ void __init lpc18xx_iomux_init(void)
 		 * Configure I2C1 pins I2C1_SDA and I2C1_SCL: setup EHS, EZI,
 		 * ZIF bits (refer to section 15.4.1 of UM)
 		 */
-		lpc18xx_pin_config(0xE, 13, LPC18XX_IOMUX_CONFIG(2, 0, 0, 1, 1, 1));
-		lpc18xx_pin_config(0xE, 15, LPC18XX_IOMUX_CONFIG(2, 0, 0, 1, 1, 1));
+		lpc18xx_pin_config(0xE, 13,
+				LPC18XX_IOMUX_CONFIG(2, 0, 0, 1, 1, 1));
+		lpc18xx_pin_config(0xE, 15,
+				LPC18XX_IOMUX_CONFIG(2, 0, 0, 1, 1, 1));
 #endif
+
+#if defined(CONFIG_LPC18XX_MMC)
+/* LPC18XX_IOMUX_CONFIG(func,epldwn,neplup,ehighslew,einput,glitchfilter) */
+		/* PC_0 - SDIO_CLK */
+		lpc18xx_pin_config(0xC, 0,
+				LPC18XX_IOMUX_CONFIG(7, 0, 1, 1, 1, 1));
+		/* PC_1 - SDIO_VOLT0 */
+		// lpc18xx_pin_config(0xC, 1,
+		//		LPC18XX_IOMUX_CONFIG(7, 0, 0, 1, 0, 1));
+		/* PC_2 - SDIO_RST (?) */
+		lpc18xx_pin_config(0xC, 2,
+				LPC18XX_IOMUX_CONFIG(7, 0, 1, 1, 0, 1));
+		/* PC_3 - SDIO_VOLT1 */
+		//lpc18xx_pin_config(0xC, 3,
+		//		LPC18XX_IOMUX_CONFIG(7, 0, 0, 1, 0, 1));
+		/* PC_4 - SDIO_D0 */
+		lpc18xx_pin_config(0xC, 4,
+				LPC18XX_IOMUX_CONFIG(7, 0, 1, 1, 1, 1));
+		/* PC_5 - SDIO_D1 */
+		lpc18xx_pin_config(0xC, 5,
+				LPC18XX_IOMUX_CONFIG(7, 0, 1, 1, 1, 1));
+		/* PC_6 - SDIO_D2 */
+		lpc18xx_pin_config(0xC, 6,
+				LPC18XX_IOMUX_CONFIG(7, 0, 1, 1, 1, 1));
+		/* PC_7 - SDIO_D3 */
+		lpc18xx_pin_config(0xC, 7,
+				LPC18XX_IOMUX_CONFIG(7, 0, 1, 1, 1, 1));
+		/* PC_8 - SDIO_CD */
+		lpc18xx_pin_config(0xC, 8,
+				LPC18XX_IOMUX_CONFIG(7, 0, 1, 0, 1, 0));
+		/* PC_10 - SDIO_CMD */
+		lpc18xx_pin_config(0xC, 10,
+				LPC18XX_IOMUX_CONFIG(7, 0, 1, 1, 1, 1));
+		/* PD_1 - SDIO_POW */
+		lpc18xx_pin_config(0xD, 1,
+				LPC18XX_IOMUX_CONFIG(5, 0, 1, 0, 0, 0));
+#endif /* CONFIG_LPC18XX_MMC */
 	}
 
-	if (p == PLATFORM_LPC18XX_EA_LPC4357_EVAL) {
+	else if (p == PLATFORM_LPC18XX_EA_LPC4357_EVAL) {
+
+#if defined (CONFIG_FB_ARMCLCD) || defined(CONFIG_MTD_M25P80_SPIFI)
 		int i;
+#endif
+
+#if defined(CONFIG_GPIOLIB) && defined(CONFIG_GPIO_SYSFS)
+
+		/* 5-key joystick (SW7) */
+		/* GPIO4[8] */
+		lpc18xx_pin_config(0xA, 1, LPC18XX_IOMUX_CONFIG_IN(0));
+#if 0
+		/* User Input */
+		/* GPIOTBD[TBD] */
+		lpc18xx_pin_config(0xTBD, TBD, LPC18XX_IOMUX_CONFIG_OUT(0));
+#endif
+
+#endif
+
+#if defined (CONFIG_FB_ARMCLCD)
+		/* LCD interface */
+		static struct iomux_pin_config arm_clcd_iomux[] = {
+
+		/* RED0->4 */
+		{0x4, 2, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+		{0x8, 7, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
+		{0x8, 6, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
+		{0x8, 5, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
+		{0x8, 4, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
+
+		/* GREEN0->5 */
+		{0x4, 10, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+		{0x4, 9, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+		{0x8, 3, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
+		{0xB, 6, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+		{0xB, 5, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+		{0xB, 4, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+
+		/* BLUE0->4 */
+		{0x7, 1, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
+		{0xB, 3, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+		{0xB, 2, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+		{0xB, 1, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+		{0xB, 0, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+
+		/* LCD_FP */
+		{0x4, 5, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+		/* LCD_ENAB */
+		{0x4, 6, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
+		/* LCD_DCLK */
+		{0x4, 7, LPC18XX_IOMUX_CONFIG(0, 0, 1, 1, 1, 0)},
+		/* LCD_LE */
+		{0x7, 0, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
+		/* LCD_LP */
+		{0x7, 6, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
+		/* LCD_PWR */
+		{0x7, 7, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
+
+		};
+
+		for (i = 0; i < ARRAY_SIZE(arm_clcd_iomux); i++) {
+			struct iomux_pin_config *p = &arm_clcd_iomux[i];
+			lpc18xx_pin_config(p->group, p->pin, p->mask);
+		}
+#endif /* CONFIG_FB_ARMCLCD */
 
 #if defined(CONFIG_LPC18XX_I2C0)
 		writel(LPC18XX_SFSI2C0_CONFIG, LPC18XX_SFSI2C0);
 #endif
 
-#if defined (CONFIG_FB_ARMCLCD)
-static struct iomux_pin_config {
-	int group, pin;
-	u32 mask;
-} arm_clcd_iomux[] = {
-	/* RED0->4 */
-	{0x4, 2, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-	{0x8, 7, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
-	{0x8, 6, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
-	{0x8, 5, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
-	{0x8, 4, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
+#if defined(CONFIG_LPC18XX_I2C1)
+		/*
+		 * Configure I2C1 pins I2C1_SDA and I2C1_SCL: setup EHS, EZI,
+		 * ZIF bits (refer to section 15.4.1 of UM)
+		 */
+		lpc18xx_pin_config(0x2, 3,
+				LPC18XX_IOMUX_CONFIG(1, 0, 0, 1, 1, 1));
+		lpc18xx_pin_config(0x2, 4,
+				LPC18XX_IOMUX_CONFIG(1, 0, 0, 1, 1, 1));
+#endif
 
-	/* GREEN0->5 */
-	{0x4, 10, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-	{0x4, 9, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-	{0x8, 3, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
-	{0xB, 6, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-	{0xB, 5, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-	{0xB, 4, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-
-	/* BLUE0->4 */
-	{0x7, 1, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
-	{0xB, 3, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-	{0xB, 2, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-	{0xB, 1, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-	{0xB, 0, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-
-	/* LCD_FP */
-	{0x4, 5, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-	/* LCD_ENAB */
-	{0x4, 6, LPC18XX_IOMUX_CONFIG(2, 0, 1, 1, 1, 0)},
-	/* LCD_DCLK */
-	{0x4, 7, LPC18XX_IOMUX_CONFIG(0, 0, 1, 1, 1, 0)},
-	/* LCD_LE */
-	{0x7, 0, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
-	/* LCD_LP */
-	{0x7, 6, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
-	/* LCD_PWR */
-	{0x7, 7, LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 0)},
-};
-		for (i = 0; i < ARRAY_SIZE(arm_clcd_iomux); i++) {
-			struct iomux_pin_config *p = &arm_clcd_iomux[i];
-			lpc18xx_pin_config(p->group, p->pin, p->mask);
+#if defined(CONFIG_MTD_M25P80_SPIFI)
+		/* Setup SPIFI pins */
+		for (i = 3; i <= 7; ++i) {
+			lpc18xx_pin_config(0x3, i,
+				LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 1, 1));
 		}
+		/* SSEL is output only */
+		lpc18xx_pin_config(0x3, 8,
+				LPC18XX_IOMUX_CONFIG(3, 0, 1, 1, 0, 0));
 #endif
 	}
 }

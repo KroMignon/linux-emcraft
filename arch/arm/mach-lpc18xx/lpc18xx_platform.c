@@ -33,16 +33,28 @@
 #include <asm/mach/arch.h>
 #include <asm/mach/time.h>
 
+#include <linux/platform_device.h>
+
 #include <mach/clock.h>
 #include <mach/iomux.h>
 #include <mach/platform.h>
 #include <mach/timer.h>
-#include <mach/uart.h>
+
+#include <mach/ehci.h>
 #include <mach/eth.h>
-#include <mach/spi.h>
-#include <mach/nor-flash.h>
-#include <mach/i2c.h>
 #include <mach/fb.h>
+#include <mach/gpio.h>
+#include <mach/i2c.h>
+#include <mach/i2s.h>
+#include <mach/mmc.h>
+#include <mach/nor-flash.h>
+#include <mach/rtc.h>
+#include <mach/spi.h>
+#include <mach/spifi.h>
+#include <mach/uart.h>
+
+#include <mach/dmac.h>
+#include <mach/dma.h>
 
 /*
  * Prototypes
@@ -73,7 +85,7 @@ int lpc18xx_platform_get(void)
 }
 
 /*
- * Interface to get the SmartFusion device
+ * Find a specific LPC18XX/LPC43XX device we are running on
  */
 EXPORT_SYMBOL(lpc18xx_device_get);
 int lpc18xx_device_get(void)
@@ -161,6 +173,18 @@ static void __init lpc18xx_init(void)
 	 */
 	lpc18xx_iomux_init();
 
+	/*
+	 * Configure DMA
+	 */
+	lpc18xx_dma_init();
+
+#if defined(CONFIG_GPIOLIB)
+	/*
+	 * Register LPC18XX GPIO lines
+	 */
+	lpc18xx_gpio_init();
+#endif /* CONFIG_GPIOLIB */
+
 #if defined(CONFIG_SERIAL_8250)
 	/*
 	 * Configure the UART devices
@@ -182,11 +206,32 @@ static void __init lpc18xx_init(void)
 	lpc18xx_spi_init();
 #endif
 
+#if defined(CONFIG_I2C_LPC2K)
+	/*
+	 * Configure the I2C bus
+	 */
+	lpc18xx_i2c_init();
+#endif
+
+#if defined(CONFIG_MMC_DW)
+	/*
+	 * Configure the DW MMC
+	 */
+	lpc18xx_mmc_init();
+#endif
+
 #if defined(CONFIG_MTD_PHYSMAP)
 	/*
 	 * Configure external NOR flash
 	 */
 	lpc18xx_nor_flash_init();
+#endif
+
+#if defined(CONFIG_MTD_M25P80_SPIFI)
+	/*
+	 * Configure the M25P80 over SPIFI driver
+	 */
+	lpc18xx_spifi_init();
 #endif
 
 #if defined(CONFIG_FB_ARMCLCD)
@@ -196,10 +241,25 @@ static void __init lpc18xx_init(void)
 	lpc18xx_fb_init();
 #endif
 
-#if defined(CONFIG_I2C_LPC2K)
+#if defined(CONFIG_USB_EHCI_LPC43XX)
 	/*
-	 * Configure the I2C bus
+	 * Configure USB0 host
 	 */
-	lpc18xx_i2c_init();
+	lpc43xx_ehci_init();
 #endif
+
+#if defined(CONFIG_SND_LPC3XXX_SOC)
+	/*
+	 * Configure I2S (audio)
+	 */
+	lpc18xx_i2s_init();
+#endif
+
+#if defined(CONFIG_RTC_DRV_LPC178X)
+	/*
+	 * Configure on-chip RTC
+	 */
+	lpc18xx_rtc_init();
+#endif
+
 }

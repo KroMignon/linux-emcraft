@@ -1349,7 +1349,7 @@ static int nand_do_read_ops(struct mtd_info *mtd, loff_t from,
 	if (mtd->ecc_stats.failed - stats.failed)
 		return -EBADMSG;
 
-	return  mtd->ecc_stats.corrected - stats.corrected ? -EUCLEAN : 0;
+	return 0;
 }
 
 /**
@@ -2225,6 +2225,17 @@ static int nand_write_oob(struct mtd_info *mtd, loff_t to,
 	return ret;
 }
 
+static int nand_fake_write_oob(struct mtd_info *mtd, loff_t to,
+			  struct mtd_oob_ops *ops)
+{
+	mtd = mtd;
+	to  = to;
+
+	ops->oobretlen = ops->ooblen;
+
+	return 0;
+}
+
 /**
  * single_erease_cmd - [GENERIC] NAND standard block erase command function
  * @mtd:	MTD device structure
@@ -2528,9 +2539,11 @@ static void nand_resume(struct mtd_info *mtd)
 
 	if (chip->state == FL_PM_SUSPENDED)
 		nand_release_device(mtd);
+#if 0
 	else
 		printk(KERN_ERR "%s called for a chip which is not "
 		       "in suspended state\n", __func__);
+#endif
 }
 
 /*
@@ -2990,6 +3003,10 @@ int nand_scan_tail(struct mtd_info *mtd)
 	/* Fill in remaining MTD driver data */
 	mtd->type = MTD_NANDFLASH;
 	mtd->flags = MTD_CAP_NANDFLASH;
+	if (chip->options & NAND_NO_OOB_WRITE)
+	{
+		mtd->flags &= ~MTD_OOB_WRITEABLE;
+	}
 	mtd->erase = nand_erase;
 	mtd->point = NULL;
 	mtd->unpoint = NULL;
@@ -2997,7 +3014,15 @@ int nand_scan_tail(struct mtd_info *mtd)
 	mtd->write = nand_write;
 	mtd->panic_write = panic_nand_write;
 	mtd->read_oob = nand_read_oob;
-	mtd->write_oob = nand_write_oob;
+	if (chip->options & NAND_NO_OOB_WRITE)
+		mtd->write_oob = nand_fake_write_oob;
+	else
+		mtd->write_oob = nand_write_oob;
+	if (chip->bbt_td && chip->bbt_td->options & NAND_BBT_WRITE)
+		mtd->write_oob_bbt = nand_write_oob;
+	else
+		mtd->write_oob_bbt = nand_fake_write_oob;
+
 	mtd->sync = nand_sync;
 	mtd->lock = NULL;
 	mtd->unlock = NULL;

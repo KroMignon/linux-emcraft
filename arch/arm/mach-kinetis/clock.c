@@ -178,40 +178,6 @@
 #define KINETIS_SIM_MCR_LCDSTART_MSK	(1 << 16)
 
 /*
- * Multipurpose Clock Generator (MCG) register map
- *
- * See Chapter 24 of the K60 Reference Manual (page 559)
- */
-struct kinetis_mcg_regs {
-	u8 c1;		/* MCG Control 1 Register */
-	u8 c2;		/* MCG Control 2 Register */
-	u8 c3;		/* MCG Control 3 Register */
-	u8 c4;		/* MCG Control 4 Register */
-	u8 c5;		/* MCG Control 5 Register */
-	u8 c6;		/* MCG Control 6 Register */
-	u8 status;	/* MCG Status Register */
-	u8 rsv0;
-	u8 atc;		/* MCG Auto Trim Control Register */
-	u8 rsv1;
-	u8 atcvh;	/* MCG Auto Trim Compare Value High Register */
-	u8 atcvl;	/* MCG Auto Trim Compare Value Low Register */
-	u8 c7;		/* MCG Control 7 Register */
-	u8 c8;		/* MCG Control 8 Register */
-	u8 rsv2;
-	u8 c10;		/* MCG Control 10 Register */
-	u8 c11;		/* MCG Control 11 Register */
-	u8 c12;		/* MCG Control 12 Register */
-	u8 status2;	/* MCG Status 2 Register */
-};
-
-/*
- * MCG registers base
- */
-#define KINETIS_MCG_BASE		(KINETIS_AIPS0PERIPH_BASE + 0x00064000)
-#define KINETIS_MCG			((volatile struct kinetis_mcg_regs *) \
-					KINETIS_MCG_BASE)
-
-/*
  * The structure that holds the information about a clock
  */
 struct clk {
@@ -334,6 +300,7 @@ long clk_round_rate(struct clk *clk, unsigned long rate)
 }
 EXPORT_SYMBOL(clk_round_rate);
 
+#ifdef CONFIG_KINETIS_MAC
 /*
  * Clock for the Ethernet module of the MCU. The clock rate is initialized
  * in `kinetis_clock_init()`.
@@ -341,10 +308,11 @@ EXPORT_SYMBOL(clk_round_rate);
 static struct clk clk_net = {
 	.gate = KINETIS_CG_ENET,
 };
+#endif
 
 /*
- * Clock for the LCD Controller module of the MCU. The clock rate is initialized
- * in `kinetis_clock_init()`.
+ * Clock for the LCD Controller module of the MCU.
+ * The clock rate is initialized in `kinetis_clock_init()`.
  */
 static struct clk clk_lcdc = {
 	.gate = KINETIS_CG_LCDC,
@@ -357,6 +325,9 @@ static struct clk clk_lcdc = {
  * The clock rates are initialized in `kinetis_clock_init()`.
  */
 static struct clk clk_uart[6];
+#if defined(CONFIG_PM)
+static struct clk clk_suspend_uart[6];
+#endif
 
 /*
  * Clocks for each of the 3 SPI controllers supported by the Kinetis K70 MCUs.
@@ -377,6 +348,15 @@ static struct clk clk_spi2 = {
 };
 #endif
 
+#ifdef CONFIG_RTC_DRV_KINETIS
+/*
+ * Clock for the Kinetis on-chip RTC
+ */
+static struct clk clk_rtc = {
+	.gate = KINETIS_CG_RTC,
+};
+#endif
+
 /*
  * Enable the USB-HS/FS module clock
  */
@@ -387,7 +367,6 @@ static void usb_clk_enable(struct clk *clk)
 	/* Wait for the clock to stabilize before accessing the register map */
 	mdelay(10);
 }
-
 
 /*
  * USB-HS module clock
@@ -415,14 +394,46 @@ static struct clk clk_usbfs = {
 		.con_id		= _conname,		\
 	}
 static struct clk_lookup kinetis_clkregs[] = {
+#ifdef CONFIG_KINETIS_MAC
 	INIT_CLKREG(&clk_net, NULL, "fec_clk"),
+#endif
 	INIT_CLKREG(&clk_lcdc, "imx-fb.0", NULL),
+#ifdef CONFIG_KINETIS_UART0
 	INIT_CLKREG(&clk_uart[0], "kinetis-uart.0", NULL),
+#ifdef CONFIG_KINETIS_UART0_WAKEUP
+	INIT_CLKREG(&clk_suspend_uart[0], NULL, "kinetis-suspend-uart.0"),
+#endif
+#endif
+#ifdef CONFIG_KINETIS_UART1
 	INIT_CLKREG(&clk_uart[1], "kinetis-uart.1", NULL),
+#ifdef CONFIG_KINETIS_UART1_WAKEUP
+	INIT_CLKREG(&clk_suspend_uart[1], NULL, "kinetis-suspend-uart.1"),
+#endif
+#endif
+#ifdef CONFIG_KINETIS_UART2
 	INIT_CLKREG(&clk_uart[2], "kinetis-uart.2", NULL),
+#ifdef CONFIG_KINETIS_UART2_WAKEUP
+	INIT_CLKREG(&clk_suspend_uart[2], NULL, "kinetis-suspend-uart.2"),
+#endif
+#endif
+#ifdef CONFIG_KINETIS_UART3
 	INIT_CLKREG(&clk_uart[3], "kinetis-uart.3", NULL),
+#ifdef CONFIG_KINETIS_UART3_WAKEUP
+	INIT_CLKREG(&clk_suspend_uart[3], NULL, "kinetis-suspend-uart.3"),
+#endif
+#endif
+#ifdef CONFIG_KINETIS_UART4
 	INIT_CLKREG(&clk_uart[4], "kinetis-uart.4", NULL),
+#ifdef CONFIG_KINETIS_UART4_WAKEUP
+	INIT_CLKREG(&clk_suspend_uart[4], NULL, "kinetis-suspend-uart.4"),
+#endif
+#endif
+#ifdef CONFIG_KINETIS_UART5
 	INIT_CLKREG(&clk_uart[5], "kinetis-uart.5", NULL),
+#ifdef CONFIG_KINETIS_UART5_WAKEUP
+	INIT_CLKREG(&clk_suspend_uart[5], NULL, "kinetis-suspend-uart.5"),
+#endif
+#endif
 #ifdef CONFIG_KINETIS_SPI0
 	INIT_CLKREG(&clk_spi0, "kinetis-dspi.0", NULL),
 #endif
@@ -431,6 +442,9 @@ static struct clk_lookup kinetis_clkregs[] = {
 #endif
 #ifdef CONFIG_KINETIS_SPI2
 	INIT_CLKREG(&clk_spi2, "kinetis-dspi.2", NULL),
+#endif
+#ifdef CONFIG_RTC_DRV_KINETIS
+	INIT_CLKREG(&clk_rtc, "rtc-kinetis", NULL),
 #endif
 	INIT_CLKREG(&clk_usbhs, "mxc-ehci.0", "usb"),
 	INIT_CLKREG(&clk_usbfs, "khci-hcd.0", "khci"),
@@ -572,6 +586,9 @@ void __init kinetis_clock_init(void)
 	int osc_sel;
 	/* Frequency at the MCGOUTCLK output of the MCG */
 	int mcgout;
+#if defined(CONFIG_PM)
+	int msgout_suspended, pclk_suspended;
+#endif
 	/* USBs clock divider values */
 	int usb_div;
 	int usb_frac;
@@ -686,6 +703,17 @@ void __init kinetis_clock_init(void)
 		(((KINETIS_SIM->clkdiv1 & KINETIS_SIM_CLKDIV1_OUTDIV2_MSK) >>
 		KINETIS_SIM_CLKDIV1_OUTDIV2_BITS) + 1);
 
+#if defined(CONFIG_PM)
+	/*
+	 * MSGOUT is defined by Fast Internal Clock (4MHz) in suspend mode.
+	 * Peripheral clock in suspend is a function of the above clock.
+	 */
+	msgout_suspended = 4000000;
+	pclk_suspended = msgout_suspended /
+		(((KINETIS_SIM->clkdiv1 & KINETIS_SIM_CLKDIV1_OUTDIV2_MSK) >>
+		KINETIS_SIM_CLKDIV1_OUTDIV2_BITS) + 1);
+#endif
+
 	/*
 	 * Ethernet clock
 	 */
@@ -770,16 +798,24 @@ void __init kinetis_clock_init(void)
 		(usb_frac << KINETIS_SIM_CLKDIV2_USBFSFRAC_BIT) |
 		(usb_div << KINETIS_SIM_CLKDIV2_USBFSDIV_BIT);
 
+#ifdef CONFIG_KINETIS_MAC
 	/*
 	 * Initialize the `clk_*` structures
 	 */
 	clk_net.rate = clock_val[CLOCK_MACCLK];
+#endif
+
 	/*
-	 * UART0 and UART1 are clocked from the core clock, the remaining UARTs
-	 * are clocked from the bus clock.
+	 * UART0 and UART1 are clocked from the core clock,
+	 * the remaining UARTs are clocked from the bus clock.
 	 */
-	for (i = 0; i < ARRAY_SIZE(clk_uart); i++)
+	for (i = 0; i < ARRAY_SIZE(clk_uart); i++) {
 		clk_uart[i].rate = clock_val[i <= 1 ? CLOCK_CCLK : CLOCK_PCLK];
+#if defined(CONFIG_PM)
+		clk_suspend_uart[i].rate = i <= 1 ?
+			msgout_suspended : pclk_suspended;
+#endif
+	}
 
 #ifdef CONFIG_KINETIS_SPI0
 	clk_spi0.rate = clock_val[CLOCK_PCLK];

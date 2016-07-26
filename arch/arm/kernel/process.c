@@ -250,7 +250,7 @@ void __show_regs(struct pt_regs *regs)
 		int *ptr = (int *)regs->ARM_pc;
 		printk("Code dump at pc [%08lx]:\n", regs->ARM_pc);
 		for (i = 0; i < 4; i ++, ptr++) {
-			printk("%08lx ", *ptr);
+			printk("%08x ", *ptr);
 		}
 		printk("\n");
 	}
@@ -356,6 +356,9 @@ copy_thread(unsigned long clone_flags, unsigned long stack_start,
 
 	if (clone_flags & CLONE_SETTLS)
 		thread->tp_value = regs->ARM_r3;
+
+	if (!(CLONE_VFORK & clone_flags))
+		thread_notify(THREAD_NOTIFY_COPY, thread);
 
 	return 0;
 }

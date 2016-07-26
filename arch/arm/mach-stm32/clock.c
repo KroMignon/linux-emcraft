@@ -9,7 +9,7 @@
  * Alexander Potashev <aspotashev@emcraft.com>
  *
  * Implement clock driver based on the clk_*() API
- * (C) Copyright 2012
+ * (C) Copyright 2012-2015
  * Emcraft Systems, <www.emcraft.com>
  * Alexander Potashev <aspotashev@emcraft.com>
  *
@@ -113,6 +113,13 @@
  */
 #define STM32_RCC_ENR_SDIOEN		(1 << 11)
 
+#define STM32_RCC_ENR_LTDCEN		(1 << 26)
+
+/*
+ * Clock values
+ */
+static u32 clock_val[CLOCK_END];
+
 /*
  * The structure that holds the information about a clock
  */
@@ -126,6 +133,7 @@ struct clk {
 	/* Custom `clk_*` functions */
 	void (*clk_enable)(struct clk *clk);
 	void (*clk_disable)(struct clk *clk);
+	int (*clk_set_rate)(struct clk *clk, unsigned long rate);
 };
 
 static DEFINE_SPINLOCK(clocks_lock);
@@ -173,12 +181,13 @@ EXPORT_SYMBOL(clk_get_rate);
 
 /*
  * clk_set_rate - set the clock rate for a clock source
- *
- * We do not support this, because we assume that all clock rates are fixed.
  */
 int clk_set_rate(struct clk *clk, unsigned long rate)
 {
-	return -EINVAL;
+	if (clk->clk_set_rate)
+		return clk->clk_set_rate(clk, rate);
+	else
+		return -EINVAL;
 }
 EXPORT_SYMBOL(clk_set_rate);
 
@@ -219,6 +228,96 @@ static struct clk clk_mci = {
 	.clk_disable = mci_clk_disable,
 };
 
+#define RCC_CR_PLLSAION		(1 << 28)
+
+/*
+ * Enable the LCD Controller clock
+ */
+static void ltdc_clk_enable(struct clk *clk)
+{
+	STM32_RCC->apb2enr |= STM32_RCC_ENR_LTDCEN;
+}
+
+/*
+ * Disable the LCD Controller clock
+ */
+static void ltdc_clk_disable(struct clk *clk)
+{
+	STM32_RCC->apb2enr &= ~STM32_RCC_ENR_LTDCEN;
+}
+
+#define RCC_DCKCFGR_PLLSAIDIVR	(3 << 16)
+#define RCC_PLLSAIDivR_Div8	(2 << 16)
+
+/*
+ * Disable the LCD pixel clock
+ */
+static void sai_r_clk_disable(struct clk *clk)
+{
+	STM32_RCC->cr &= ~RCC_CR_PLLSAION;
+}
+
+/*
+ * Enable the LCD pixel clock
+ */
+static void sai_r_clk_enable(struct clk *clk)
+{
+	u32 parent_rate;
+	u32 sai_n;
+	u32 sai_q;
+	u32 sai_r;
+	u32 sai_div_r;
+	u32 dckcfgr;
+
+	sai_q = 7;
+	sai_r = 3;
+	sai_div_r = 8;
+
+	parent_rate = clock_val[CLOCK_DIVM];
+
+	/* Calculate N to match the requested rate */
+	sai_n = clk->rate * sai_r * sai_div_r / parent_rate;
+
+	/* Disable PLLSAI */
+	sai_r_clk_disable(clk);
+
+	/* Configure PLLSAI */
+	STM32_RCC->pllsaicfgr = (sai_n << 6) | (sai_q << 24) | (sai_r << 28);
+
+	/* Configure divider on the "R" output of PLLSAI */
+	dckcfgr = STM32_RCC->dckcfgr;
+
+	/* Clear PLLSAIDIVR[2:0] bits */
+	dckcfgr &= ~RCC_DCKCFGR_PLLSAIDIVR;
+
+	/* Set PLLSAIDIVR values */
+	dckcfgr |= RCC_PLLSAIDivR_Div8;
+
+	/* Store the new value */
+	STM32_RCC->dckcfgr = dckcfgr;
+
+	STM32_RCC->cr |= RCC_CR_PLLSAION;
+	while ((STM32_RCC->cr & (1 << 29)) == 0);
+}
+
+static int sai_r_clk_set_rate(struct clk *clk, unsigned long rate)
+{
+	clk->rate = rate;
+	return 0;
+}
+
+static struct clk clk_ltdc = {
+	.clk_enable = ltdc_clk_enable,
+	.clk_disable = ltdc_clk_disable,
+};
+
+static struct clk clk_sai_r = {
+	.rate = 9000000,
+	.clk_enable = sai_r_clk_enable,
+	.clk_disable = sai_r_clk_disable,
+	.clk_set_rate = sai_r_clk_set_rate,
+};
+
 /*
  * Array of all clock to register with the `clk_*` infrastructure
  */
@@ -229,13 +328,10 @@ static struct clk clk_mci = {
 		.con_id		= _conname,		\
 	}
 static struct clk_lookup stm32_clkregs[] = {
-	INIT_CLKREG(&clk_mci, "mmci0", NULL),
+	INIT_CLKREG(&clk_mci, "mmci-pl18x", NULL),
+	INIT_CLKREG(&clk_ltdc, "stm32f4-ltdc.0", NULL),
+	INIT_CLKREG(&clk_sai_r, NULL, "sai_r_clk"),
 };
-
-/*
- * Clock values
- */
-static u32 clock_val[CLOCK_END];
 
 /*
  * Initialize the reference clocks.
@@ -271,7 +367,11 @@ void __init stm32_clock_init(void)
 		break;
 	case PLATFORM_STM32_STM_SOM:
 	case PLATFORM_STM32_STM_STM32F439_SOM:
+	case PLATFORM_STM32_STM_STM32F7_SOM:
 		hse_hz = 12000000;
+		break;
+	case PLATFORM_STM32_STM32F7_DISCO:
+		hse_hz = 25000000;
 		break;
 	case PLATFORM_STM32_STM_DISCO:
 		hse_hz = 8000000;
@@ -340,9 +440,13 @@ void __init stm32_clock_init(void)
 			/* HSI used as PLL clock source */
 			tmp = STM32_HSI_HZ;
 		}
+
+		/* Input clock for PLL, PLLI2S and PLLSAI */
+		clock_val[CLOCK_DIVM] = tmp / pllm;
+
 		pllvco  = STM32_RCC->pllcfgr >> STM32F2_RCC_PLLCFGR_PLLN_BIT;
 		pllvco &= STM32F2_RCC_PLLCFGR_PLLN_MSK;
-		pllvco *= tmp / pllm;
+		pllvco *= clock_val[CLOCK_DIVM];
 
 		pllp  = STM32_RCC->pllcfgr >> STM32F2_RCC_PLLCFGR_PLLP_BIT;
 		pllp &= STM32F2_RCC_PLLCFGR_PLLP_MSK;
